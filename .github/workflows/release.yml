@@ -1,0 +1,144 @@
+name: Release Builds
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach binaries to (e.g. v0.1.0)'
+        required: false
+        default: 'v0.1.0'
+  release:
+    types: [published]
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Read version from Cargo.toml
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          tag="${{ github.event.inputs.tag }}"
+          if [ -z "$tag" ]; then
+            if [ -n "${{ github.event.release.tag_name }}" ]; then
+              tag="${{ github.event.release.tag_name }}"
+            elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+              tag="${GITHUB_REF#refs/tags/}"
+            else
+              tag="v$version"
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Version: $version, Tag: $tag"
+
+  linux:
+    needs: version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Package Linux tarball
+        run: |
+          name="OxyConvert-${{ needs.version.outputs.version }}-linux-x86_64"
+          mkdir -p "dist/$name"
+          cp target/release/oxyconvert README.md SPEC_OXYADDON.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          cp packaging/icons/oxybrush-256.png "dist/$name/oxybrush.png"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          rm -rf "dist/$name"
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-dist
+          path: dist/*.tar.gz
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Install NSIS
+        run: choco install nsis --no-progress -y
+      - name: Build NSIS Installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory "dist" -Force | Out-Null
+          cd packaging/windows
+          makensis /DAppVersion=${{ needs.version.outputs.version }} /DSourceExe=..\..\target\release\oxyconvert.exe installer.nsi
+          Get-ChildItem ..\..\dist
+      - name: Build Portable Zip
+        shell: pwsh
+        run: |
+          $name = "OxyConvert-${{ needs.version.outputs.version }}-windows-x86_64-portable"
+          New-Item -ItemType Directory "dist\$name" -Force | Out-Null
+          Copy-Item target\release\oxyconvert.exe, README.md, SPEC_OXYADDON.md, LICENSE-MIT, LICENSE-APACHE "dist\$name\"
+          Compress-Archive -Path "dist\$name\*" -DestinationPath "dist\$name.zip"
+          Remove-Item -Recurse "dist\$name"
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-dist
+          path: dist/*
+
+  macos:
+    needs: version
+    runs-on: macos-latest
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --target aarch64-apple-darwin
+      - run: cargo build --release --target x86_64-apple-darwin
+      - name: Build Universal App Bundle and DMG
+        run: |
+          chmod +x packaging/macos/make_app.sh
+          packaging/macos/make_app.sh "${{ needs.version.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dist
+          path: dist/*.dmg
+
+  publish:
+    needs: [version, linux, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: "*-dist"
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Upload Assets to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

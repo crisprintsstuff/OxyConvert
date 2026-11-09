@@ -3,9 +3,19 @@ Unicode true
 !define APPNAME "OxyConvert"
 !define COMPANYNAME "OxyLabs"
 !define DESCRIPTION "Universal Addon & Plugin Converter for OxyBrush"
-!define VERSIONMAJOR 0
-!define VERSIONMINOR 1
-!define VERSIONBUILD 0
+
+!ifndef AppVersion
+  !define AppVersion "0.1.0"
+!endif
+
+!ifndef SourceExe
+  !define SourceExe "..\..\target\x86_64-pc-windows-msvc\release\oxyconvert.exe"
+!endif
+
+!ifndef OutSetupExe
+  !define OutSetupExe "..\..\dist\OxyConvert-${AppVersion}-windows-x86_64-setup.exe"
+!endif
+
 !define HELPURL "https://github.com/crisprintsstuff/OxyConvert"
 !define UPDATEURL "https://github.com/crisprintsstuff/OxyConvert/releases"
 !define ABOUTURL "https://github.com/crisprintsstuff/OxyConvert"
@@ -17,8 +27,8 @@ SetCompressor /SOLID lzma
 InstallDir "$LOCALAPPDATA\Programs\OxyConvert"
 InstallDirRegKey HKCU "Software\OxyLabs\OxyConvert" "InstallLocation"
 
-Name "${APPNAME} ${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
-OutFile "..\..\dist\OxyConvert-0.1.0-windows-x86_64-setup.exe"
+Name "${APPNAME} ${AppVersion}"
+OutFile "${OutSetupExe}"
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
@@ -43,7 +53,7 @@ OutFile "..\..\dist\OxyConvert-0.1.0-windows-x86_64-setup.exe"
 
 Section "Install"
     SetOutPath "$INSTDIR"
-    File "..\..\target\x86_64-pc-windows-msvc\release\oxyconvert.exe"
+    File /oname=oxyconvert.exe "${SourceExe}"
     File "..\..\README.md"
     File "..\..\SPEC_OXYADDON.md"
     File "..\..\LICENSE-MIT"
@@ -68,7 +78,7 @@ Section "Install"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyConvert" "HelpLink" "${HELPURL}"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyConvert" "URLUpdateInfo" "${UPDATEURL}"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyConvert" "URLInfoAbout" "${ABOUTURL}"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyConvert" "DisplayVersion" "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyConvert" "DisplayVersion" "${AppVersion}"
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyConvert" "NoModify" 1
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyConvert" "NoRepair" 1
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyConvert" "EstimatedSize" ${INSTALLSIZE}
