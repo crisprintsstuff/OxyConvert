@@ -1,6 +1,6 @@
 //! Command-line interface for OxyConvert.
 
-use crate::converters::{convert_script, detect_ecosystem, ConversionOptions};
+use crate::converters::{ConversionOptions, convert_script, detect_ecosystem};
 use crate::package::bundle::AddonPackage;
 use crate::package::installer::{install_addon, list_installed_addons, oxybrush_plugins_dir};
 use crate::package::manifest::SourceEcosystem;
@@ -149,18 +149,24 @@ pub fn run_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 };
                 match eco {
                     SourceEcosystem::Zbrush => {
-                        let (res, extra) = crate::converters::zbrush::convert_zbrush_zip(&input, &options)?;
+                        let (res, extra) =
+                            crate::converters::zbrush::convert_zbrush_zip(&input, &options)?;
                         (res, extra)
                     }
                     _ => {
-                        let res = crate::converters::blender::convert_blender_zip(&input, &options)?;
+                        let res =
+                            crate::converters::blender::convert_blender_zip(&input, &options)?;
                         (res, std::collections::BTreeMap::new())
                     }
                 }
             } else if ext == "zsc" {
                 let bytes = fs::read(&input)?;
-                let file_name = input.file_name().and_then(|n| n.to_str()).unwrap_or("plugin.zsc");
-                let res = crate::converters::zbrush::convert_zbrush_zsc(&bytes, file_name, &options);
+                let file_name = input
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("plugin.zsc");
+                let res =
+                    crate::converters::zbrush::convert_zbrush_zsc(&bytes, file_name, &options);
                 (res, std::collections::BTreeMap::new())
             } else {
                 let bytes = fs::read(&input)?;
@@ -211,7 +217,11 @@ pub fn run_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Pack { dir, output }) => {
             let package = AddonPackage::from_directory(&dir)?;
             package.save_to_archive(&output)?;
-            println!("Packed '{}' into {}", package.manifest.name, output.display());
+            println!(
+                "Packed '{}' into {}",
+                package.manifest.name,
+                output.display()
+            );
             Ok(())
         }
 
@@ -225,7 +235,11 @@ pub fn run_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Install { package }) => {
             let pkg = AddonPackage::open(&package)?;
             let path = install_addon(&pkg, false, true)?;
-            println!("Successfully installed '{}' to {}", pkg.manifest.name, path.display());
+            println!(
+                "Successfully installed '{}' to {}",
+                pkg.manifest.name,
+                path.display()
+            );
             Ok(())
         }
 

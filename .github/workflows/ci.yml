@@ -1,0 +1,72 @@
+name: CI & Release Builds
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    name: Check & Tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test
+
+  build-windows:
+    name: Build Windows Release
+    runs-on: windows-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Install NSIS
+        run: choco install nsis --no-progress -y
+      - name: Build Installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory "dist" -Force | Out-Null
+          cd packaging/windows
+          makensis installer.nsi
+      - name: Build Portable Zip
+        shell: pwsh
+        run: |
+          $name = "OxyConvert-windows-x86_64-portable"
+          New-Item -ItemType Directory "dist\$name" -Force | Out-Null
+          Copy-Item target\release\oxyconvert.exe, README.md, SPEC_OXYADDON.md, LICENSE-MIT, LICENSE-APACHE "dist\$name\"
+          Compress-Archive -Path "dist\$name\*" -DestinationPath "dist\$name.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: dist/*
+
+  build-linux:
+    name: Build Linux Portable
+    runs-on: ubuntu-22.04
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Package Linux Tarball
+        run: |
+          mkdir -p dist/OxyConvert-linux-x86_64
+          cp target/release/oxyconvert README.md SPEC_OXYADDON.md LICENSE-MIT LICENSE-APACHE dist/OxyConvert-linux-x86_64/
+          tar -C dist -czf dist/OxyConvert-linux-x86_64.tar.gz OxyConvert-linux-x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: dist/*.tar.gz

@@ -146,19 +146,22 @@ impl InAppFileDialog {
                     ui.label(RichText::new("Quick Folders:").weak());
 
                     if ui.button("🏠 Home").clicked()
-                        && let Some(home) = dirs::home_dir() {
-                            self.set_dir(home);
-                        }
+                        && let Some(home) = dirs::home_dir()
+                    {
+                        self.set_dir(home);
+                    }
 
                     if ui.button("💼 Current Dir").clicked()
-                        && let Ok(cwd) = std::env::current_dir() {
-                            self.set_dir(cwd);
-                        }
+                        && let Ok(cwd) = std::env::current_dir()
+                    {
+                        self.set_dir(cwd);
+                    }
 
                     if let Some(pdir) = oxybrush_plugins_dir()
-                        && ui.button("🎨 OxyBrush Plugins").clicked() {
-                            self.set_dir(pdir);
-                        }
+                        && ui.button("🎨 OxyBrush Plugins").clicked()
+                    {
+                        self.set_dir(pdir);
+                    }
 
                     // Sibling OxyBrush examples directory
                     let sibling_examples = PathBuf::from("../OxyBrush/examples/plugins");
@@ -185,9 +188,10 @@ impl InAppFileDialog {
                 // Path navigation bar
                 ui.horizontal(|ui| {
                     if ui.button("⬆ Up").clicked()
-                        && let Some(parent) = self.current_dir.parent() {
-                            self.set_dir(parent.to_path_buf());
-                        }
+                        && let Some(parent) = self.current_dir.parent()
+                    {
+                        self.set_dir(parent.to_path_buf());
+                    }
 
                     let path_res = ui.text_edit_singleline(&mut self.path_input);
                     if path_res.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -221,7 +225,8 @@ impl InAppFileDialog {
                         let mut clicked_file = None;
 
                         if let Ok(entries) = fs::read_dir(&self.current_dir) {
-                            let mut sorted_entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+                            let mut sorted_entries: Vec<_> =
+                                entries.filter_map(|e| e.ok()).collect();
                             sorted_entries.sort_by_key(|e| {
                                 let is_d = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
                                 (!is_d, e.file_name().to_string_lossy().to_lowercase())
@@ -243,13 +248,21 @@ impl InAppFileDialog {
 
                                 ui.horizontal(|ui| {
                                     if is_dir {
-                                        ui.label(RichText::new("📁").color(Color32::from_rgb(230, 190, 80)));
+                                        ui.label(
+                                            RichText::new("📁")
+                                                .color(Color32::from_rgb(230, 190, 80)),
+                                        );
                                         if ui.link(&file_name).clicked() {
                                             next_dir = Some(path.clone());
                                         }
                                     } else {
-                                        let is_selected = self.selected_file.as_ref() == Some(&path);
-                                        let icon = match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
+                                        let is_selected =
+                                            self.selected_file.as_ref() == Some(&path);
+                                        let icon = match path
+                                            .extension()
+                                            .and_then(|e| e.to_str())
+                                            .unwrap_or("")
+                                        {
                                             "py" => "🐍",
                                             "txt" | "zsc" => "🗿",
                                             "js" | "json" => "📱",
@@ -273,9 +286,10 @@ impl InAppFileDialog {
                         }
                         if let Some(f) = clicked_file {
                             if self.is_save_mode
-                                && let Some(name) = f.file_name() {
-                                    self.save_filename = name.to_string_lossy().into_owned();
-                                }
+                                && let Some(name) = f.file_name()
+                            {
+                                self.save_filename = name.to_string_lossy().into_owned();
+                            }
                             self.selected_file = Some(f);
                         }
                     });
@@ -312,7 +326,10 @@ impl InAppFileDialog {
                             self.selected_file.is_some()
                         };
 
-                        if ui.add_enabled(can_act, egui::Button::new(action_btn_text)).clicked() {
+                        if ui
+                            .add_enabled(can_act, egui::Button::new(action_btn_text))
+                            .clicked()
+                        {
                             if self.is_save_mode {
                                 let mut out = self.current_dir.join(self.save_filename.trim());
                                 if out.extension().is_none() {

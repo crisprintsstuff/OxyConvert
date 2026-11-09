@@ -3,3 +3,7 @@
 *.oxyaddon
 dist/
 .DS_Store
+.cargo-packager/
+plugins-test/
+*.tmp
+

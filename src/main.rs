@@ -3,7 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use clap::Parser;
-use oxyconvert::cli::{run_cli, Cli, Commands};
+use oxyconvert::cli::{Cli, Commands, run_cli};
 use oxyconvert::ui::OxyConvertApp;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -12,9 +12,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // If an explicit CLI command was requested (except Gui), run headlessly
     if let Some(cmd) = &cli.command
-        && !matches!(cmd, Commands::Gui) {
-            return run_cli(cli);
-        }
+        && !matches!(cmd, Commands::Gui)
+    {
+        return run_cli(cli);
+    }
 
     // Launch egui GUI application
     let native_options = eframe::NativeOptions {

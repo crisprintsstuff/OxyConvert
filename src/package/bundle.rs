@@ -29,8 +29,13 @@ impl std::fmt::Display for BundleError {
             Self::Io(e) => write!(f, "I/O error: {e}"),
             Self::Zip(e) => write!(f, "Zip error: {e}"),
             Self::Json(e) => write!(f, "JSON error: {e}"),
-            Self::MissingManifest => write!(f, "Manifest file 'manifest.json' is missing from package"),
-            Self::MissingEntryPoint(ep) => write!(f, "Entry point '{ep}' specified in manifest was not found in package"),
+            Self::MissingManifest => {
+                write!(f, "Manifest file 'manifest.json' is missing from package")
+            }
+            Self::MissingEntryPoint(ep) => write!(
+                f,
+                "Entry point '{ep}' specified in manifest was not found in package"
+            ),
             Self::InvalidPath(p) => write!(f, "Invalid package path: {p}"),
         }
     }
@@ -135,7 +140,9 @@ impl AddonPackage {
         let main_script = String::from_utf8(script_bytes)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        let wat_bytes = files.remove("plugin.wat").or_else(|| files.remove("plugin.wasm"));
+        let wat_bytes = files
+            .remove("plugin.wat")
+            .or_else(|| files.remove("plugin.wasm"));
         let wat_script = wat_bytes.and_then(|b| String::from_utf8(b).ok());
 
         let icon_png = files.remove("icon.png");
@@ -172,7 +179,12 @@ impl AddonPackage {
         };
 
         let mut extra_files = BTreeMap::new();
-        scan_directory_files(dir, dir, &mut extra_files, &[MANIFEST_FILENAME, &manifest.entry_point, "icon.png"])?;
+        scan_directory_files(
+            dir,
+            dir,
+            &mut extra_files,
+            &[MANIFEST_FILENAME, &manifest.entry_point, "icon.png"],
+        )?;
 
         let wat_script = if dir.join("plugin.wat").is_file() {
             fs::read_to_string(dir.join("plugin.wat")).ok()
@@ -216,7 +228,8 @@ impl AddonPackage {
 
         // 1. Write plugin.json (native OxyBrush manifest)
         let plugin_json_content = if let Some(wat) = &self.wat_script {
-            let def = crate::converters::wasm::WasmPluginDefinition::from_source(wat, &self.manifest);
+            let def =
+                crate::converters::wasm::WasmPluginDefinition::from_source(wat, &self.manifest);
             def.to_plugin_json(&self.manifest.safe_stem())
         } else {
             self.manifest.to_plugin_json()
@@ -262,7 +275,8 @@ impl AddonPackage {
 
         // plugin.json (native OxyBrush manifest)
         let plugin_json_content = if let Some(wat) = &self.wat_script {
-            let def = crate::converters::wasm::WasmPluginDefinition::from_source(wat, &self.manifest);
+            let def =
+                crate::converters::wasm::WasmPluginDefinition::from_source(wat, &self.manifest);
             def.to_plugin_json(&self.manifest.safe_stem())
         } else {
             self.manifest.to_plugin_json()
@@ -322,13 +336,14 @@ fn scan_directory_files(
         if p.is_dir() {
             scan_directory_files(root, &p, out, ignore)?;
         } else if p.is_file()
-            && let Ok(rel) = p.strip_prefix(root) {
-                let rel_str = rel.to_string_lossy().replace('\\', "/");
-                if !ignore.iter().any(|&ig| rel_str == ig) {
-                    let bytes = fs::read(&p)?;
-                    out.insert(rel_str, bytes);
-                }
+            && let Ok(rel) = p.strip_prefix(root)
+        {
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
+            if !ignore.iter().any(|&ig| rel_str == ig) {
+                let bytes = fs::read(&p)?;
+                out.insert(rel_str, bytes);
             }
+        }
     }
     Ok(())
 }
@@ -351,7 +366,8 @@ mod tests {
         let package = AddonPackage::new(manifest.clone(), script);
 
         let zip_bytes = package.to_bytes().expect("pack should succeed");
-        let unpacked = AddonPackage::from_reader(Cursor::new(zip_bytes)).expect("unpack should succeed");
+        let unpacked =
+            AddonPackage::from_reader(Cursor::new(zip_bytes)).expect("unpack should succeed");
 
         assert_eq!(unpacked.manifest.id, "com.test.addon");
         assert_eq!(unpacked.manifest.name, "Test Addon");

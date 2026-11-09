@@ -67,12 +67,10 @@ pub struct WasmPluginDefinition {
 impl WasmPluginDefinition {
     /// Generate standard Squash-style deformation filter WebAssembly text (.wat).
     pub fn default_deformer(name: &str, description: &str) -> Self {
-        let commands = vec![
-            WasmCommand {
-                id: "apply".into(),
-                label: "Apply Deformation".into(),
-            },
-        ];
+        let commands = vec![WasmCommand {
+            id: "apply".into(),
+            label: "Apply Deformation".into(),
+        }];
         let params = vec![
             WasmParam {
                 id: "amount".into(),

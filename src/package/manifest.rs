@@ -127,7 +127,8 @@ pub struct AddonManifest {
 }
 
 fn default_schema() -> String {
-    "https://raw.githubusercontent.com/crisprintsstuff/OxyBrush/main/schemas/oxyaddon-v1.json".to_string()
+    "https://raw.githubusercontent.com/crisprintsstuff/OxyBrush/main/schemas/oxyaddon-v1.json"
+        .to_string()
 }
 
 fn default_target_app() -> String {
@@ -169,7 +170,10 @@ impl AddonManifest {
     /// Format id into a safe filename/directory stem.
     pub fn safe_stem(&self) -> String {
         // If id is empty or default generic id, use the addon's unique name
-        let raw = if self.id.is_empty() || self.id == "com.example.addon" || self.id == "com_example_addon" {
+        let raw = if self.id.is_empty()
+            || self.id == "com.example.addon"
+            || self.id == "com_example_addon"
+        {
             if !self.name.is_empty() && self.name != "Untitled Addon" {
                 &self.name
             } else {
@@ -178,8 +182,15 @@ impl AddonManifest {
         } else {
             &self.id
         };
-        let stem: String = raw.chars()
-            .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        let stem: String = raw
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '_' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect::<String>()
             .trim_matches('_')
             .to_lowercase();

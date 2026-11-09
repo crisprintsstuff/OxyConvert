@@ -177,12 +177,13 @@ pub fn uninstall_addon(path: &Path) -> io::Result<()> {
         fs::remove_file(path)?;
         // If it was an .oxyaddon, also clean up corresponding .py bridge if it exists
         if let Some(stem) = path.file_stem()
-            && let Some(parent) = path.parent() {
-                let py_bridge = parent.join(format!("{}.py", stem.to_string_lossy()));
-                if py_bridge.is_file() {
-                    let _ = fs::remove_file(py_bridge);
-                }
+            && let Some(parent) = path.parent()
+        {
+            let py_bridge = parent.join(format!("{}.py", stem.to_string_lossy()));
+            if py_bridge.is_file() {
+                let _ = fs::remove_file(py_bridge);
             }
+        }
     } else if path.is_dir() {
         fs::remove_dir_all(path)?;
     }

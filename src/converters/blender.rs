@@ -23,9 +23,7 @@ impl ScriptConverter for BlenderConverter {
         let addon_id = options.addon_id.clone().unwrap_or_else(|| {
             format!(
                 "com.oxybrush.blender.{}",
-                addon_name
-                    .to_lowercase()
-                    .replace([' ', '-', ':', '.'], "_")
+                addon_name.to_lowercase().replace([' ', '-', ':', '.'], "_")
             )
         });
 
@@ -45,7 +43,9 @@ impl ScriptConverter for BlenderConverter {
             .addon_description
             .clone()
             .or(bl_info.description)
-            .unwrap_or_else(|| "Converted from Blender Python addon to OxyBrush .oxyaddon".to_string());
+            .unwrap_or_else(|| {
+                "Converted from Blender Python addon to OxyBrush .oxyaddon".to_string()
+            });
 
         let category = options
             .category
@@ -121,7 +121,11 @@ if __name__ == "__main__":
             source_ecosystem: SourceEcosystem::Blender,
             min_oxybrush_version: "0.5.0".to_string(),
             tags: vec!["blender".into(), "converted".into(), "python".into()],
-            permissions: vec!["scene:read".into(), "scene:modify".into(), "mesh:sculpt".into()],
+            permissions: vec![
+                "scene:read".into(),
+                "scene:modify".into(),
+                "mesh:sculpt".into(),
+            ],
             homepage: None,
             license: Some("GPL-3.0-or-later".into()),
             ui: UiBinding {
@@ -135,7 +139,9 @@ if __name__ == "__main__":
         };
 
         let wasm_def = if options.runtime == crate::converters::wasm::PluginRuntime::Wasm {
-            Some(crate::converters::wasm::WasmPluginDefinition::from_source(source, &manifest))
+            Some(crate::converters::wasm::WasmPluginDefinition::from_source(
+                source, &manifest,
+            ))
         } else {
             None
         };
@@ -152,7 +158,10 @@ if __name__ == "__main__":
 }
 
 /// Convert a Blender addon distributed as a .zip archive.
-pub fn convert_blender_zip(zip_path: &std::path::Path, options: &ConversionOptions) -> Result<ConversionResult, String> {
+pub fn convert_blender_zip(
+    zip_path: &std::path::Path,
+    options: &ConversionOptions,
+) -> Result<ConversionResult, String> {
     use std::io::Read;
     let file = std::fs::File::open(zip_path).map_err(|e| format!("Could not open zip: {e}"))?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Invalid zip: {e}"))?;
@@ -176,9 +185,9 @@ pub fn convert_blender_zip(zip_path: &std::path::Path, options: &ConversionOptio
         }
     }
 
-    let source = init_content.or_else(|| py_files.first().map(|(_, t)| t.clone())).ok_or_else(|| {
-        "No Python (.py) files found in Blender addon .zip".to_string()
-    })?;
+    let source = init_content
+        .or_else(|| py_files.first().map(|(_, t)| t.clone()))
+        .ok_or_else(|| "No Python (.py) files found in Blender addon .zip".to_string())?;
 
     Ok(BlenderConverter.convert(&source, options))
 }
@@ -217,7 +226,13 @@ fn extract_bl_info(source: &str) -> BlenderInfo {
         info.category = Some(caps.get(1).unwrap().as_str().to_string());
     }
     if let Some(caps) = ver_re.captures(source) {
-        let parts: Vec<&str> = caps.get(1).unwrap().as_str().split(',').map(|s| s.trim()).collect();
+        let parts: Vec<&str> = caps
+            .get(1)
+            .unwrap()
+            .as_str()
+            .split(',')
+            .map(|s| s.trim())
+            .collect();
         info.version = Some(parts.join("."));
     }
 
@@ -270,7 +285,9 @@ fn transpile_blender_body(
         }
 
         // Track operator execute method
-        if trimmed.starts_with("def execute(self, context):") || trimmed.starts_with("def execute(self, context,") {
+        if trimmed.starts_with("def execute(self, context):")
+            || trimmed.starts_with("def execute(self, context,")
+        {
             inside_operator_execute = true;
             execute_indent_level = line.chars().take_while(|c| c.is_whitespace()).count();
             out_lines.push("# Begin operator execution:".to_string());
@@ -316,7 +333,10 @@ fn transpile_blender_body(
     if out_lines.is_empty() {
         out_lines.push("# Default mesh statistics inspection:".to_string());
         out_lines.push("stats = app.get_mesh_stats()".to_string());
-        out_lines.push("print(f'Active mesh triangles: {stats.triangle_count}, pieces: {stats.piece_count}')".to_string());
+        out_lines.push(
+            "print(f'Active mesh triangles: {stats.triangle_count}, pieces: {stats.piece_count}')"
+                .to_string(),
+        );
     }
 
     out_lines.join("\n")
@@ -338,7 +358,9 @@ fn translate_bpy_expression(
         let val_re = Regex::new(r"remesh_voxel_size\s*=\s*([0-9.]+)").unwrap();
         if let Some(caps) = val_re.captures(expr) {
             let v = caps.get(1).unwrap().as_str();
-            mapped_calls.push(format!("remesh_voxel_size = {v} -> app.voxel_remesh(voxel_size={v})"));
+            mapped_calls.push(format!(
+                "remesh_voxel_size = {v} -> app.voxel_remesh(voxel_size={v})"
+            ));
             return format!("app.voxel_remesh(voxel_size={v})");
         }
     }
@@ -370,7 +392,9 @@ fn translate_bpy_expression(
         } else {
             "Draw"
         };
-        mapped_calls.push(format!("sculpt brush select -> app.select_brush('{brush_name}')"));
+        mapped_calls.push(format!(
+            "sculpt brush select -> app.select_brush('{brush_name}')"
+        ));
         return format!("app.select_brush('{brush_name}')");
     }
 
@@ -461,7 +485,10 @@ class SCULPT_OT_remesh_decimate(bpy.types.Operator):
         assert_eq!(res.manifest.author, "BlendDev");
         assert_eq!(res.manifest.version, "1.5");
         assert_eq!(res.manifest.category, AddonCategory::Sculpting);
-        assert!(res.python_code.contains("app.voxel_remesh(voxel_size=0.04)"));
+        assert!(
+            res.python_code
+                .contains("app.voxel_remesh(voxel_size=0.04)")
+        );
         assert!(res.python_code.contains("app.voxel_remesh()"));
         assert!(res.python_code.contains("app.decimate(keep_percent=25.0)"));
     }

@@ -3,17 +3,14 @@
 use crate::converters::blender::convert_blender_zip;
 use crate::converters::detect_zip_ecosystem;
 use crate::converters::zbrush::{convert_zbrush_zip, convert_zbrush_zsc};
-use crate::converters::{
-    convert_script, detect_ecosystem, ConversionOptions, ConversionResult,
-};
+use crate::converters::{ConversionOptions, ConversionResult, convert_script, detect_ecosystem};
 use crate::package::bundle::AddonPackage;
 use crate::package::installer::{
-    install_addon, list_installed_addons, oxybrush_plugins_dir, uninstall_addon,
-    InstalledAddonInfo,
+    InstalledAddonInfo, install_addon, list_installed_addons, oxybrush_plugins_dir, uninstall_addon,
 };
 use crate::package::manifest::{AddonCategory, AddonManifest, SourceEcosystem};
 use crate::ui::file_dialog::InAppFileDialog;
-use crate::ui::theme::{apply_oxy_theme, AccentPreset, ThemePreset};
+use crate::ui::theme::{AccentPreset, ThemePreset, apply_oxy_theme};
 use crate::ui::widgets::{self, primary_button, section_header};
 use egui::{Color32, Margin, RichText, Ui, vec2};
 use std::fs;
@@ -176,7 +173,10 @@ impl OxyConvertApp {
                         serde_json::to_string_pretty(&pkg.manifest).unwrap_or_default();
                     self.selected_ecosystem = pkg.manifest.source_ecosystem;
                     let wasm_def = pkg.wat_script.map(|w| {
-                        crate::converters::wasm::WasmPluginDefinition::from_source(&w, &pkg.manifest)
+                        crate::converters::wasm::WasmPluginDefinition::from_source(
+                            &w,
+                            &pkg.manifest,
+                        )
                     });
                     self.conversion = Some(ConversionResult {
                         manifest: pkg.manifest.clone(),
@@ -188,8 +188,7 @@ impl OxyConvertApp {
                     });
                     self.status_message = format!(
                         "Successfully imported .oxyaddon package: '{}' ({})",
-                        pkg.manifest.name,
-                        pkg.manifest.id
+                        pkg.manifest.name, pkg.manifest.id
                     );
                     self.is_error_status = false;
                 }
@@ -206,53 +205,49 @@ impl OxyConvertApp {
             let options = ConversionOptions::default();
             let eco = detect_zip_ecosystem(&path);
             match eco {
-                SourceEcosystem::Zbrush => {
-                    match convert_zbrush_zip(&path, &options) {
-                        Ok((res, extra)) => {
-                            self.source_path = Some(path.clone());
-                            self.source_code = res.python_code.clone();
-                            self.extra_files = extra;
-                            self.manifest_draft = res.manifest.clone();
-                            self.raw_manifest_text =
-                                serde_json::to_string_pretty(&res.manifest).unwrap_or_default();
-                            self.selected_ecosystem = SourceEcosystem::Zbrush;
-                            self.status_message = format!(
-                                "Successfully converted ZBrush zip plugin: '{}' (bundled {} companion assets)",
-                                res.manifest.name,
-                                self.extra_files.len()
-                            );
-                            self.is_error_status = false;
-                            self.conversion = Some(res);
-                        }
-                        Err(e) => {
-                            self.status_message = format!("Failed to convert ZBrush zip: {e}");
-                            self.is_error_status = true;
-                        }
+                SourceEcosystem::Zbrush => match convert_zbrush_zip(&path, &options) {
+                    Ok((res, extra)) => {
+                        self.source_path = Some(path.clone());
+                        self.source_code = res.python_code.clone();
+                        self.extra_files = extra;
+                        self.manifest_draft = res.manifest.clone();
+                        self.raw_manifest_text =
+                            serde_json::to_string_pretty(&res.manifest).unwrap_or_default();
+                        self.selected_ecosystem = SourceEcosystem::Zbrush;
+                        self.status_message = format!(
+                            "Successfully converted ZBrush zip plugin: '{}' (bundled {} companion assets)",
+                            res.manifest.name,
+                            self.extra_files.len()
+                        );
+                        self.is_error_status = false;
+                        self.conversion = Some(res);
                     }
-                }
-                SourceEcosystem::Blender => {
-                    match convert_blender_zip(&path, &options) {
-                        Ok(res) => {
-                            self.source_path = Some(path.clone());
-                            self.source_code = res.python_code.clone();
-                            self.extra_files.clear();
-                            self.manifest_draft = res.manifest.clone();
-                            self.raw_manifest_text =
-                                serde_json::to_string_pretty(&res.manifest).unwrap_or_default();
-                            self.selected_ecosystem = SourceEcosystem::Blender;
-                            self.status_message = format!(
-                                "Successfully converted Blender zip addon: '{}'",
-                                res.manifest.name
-                            );
-                            self.is_error_status = false;
-                            self.conversion = Some(res);
-                        }
-                        Err(e) => {
-                            self.status_message = format!("Failed to convert Blender zip: {e}");
-                            self.is_error_status = true;
-                        }
+                    Err(e) => {
+                        self.status_message = format!("Failed to convert ZBrush zip: {e}");
+                        self.is_error_status = true;
                     }
-                }
+                },
+                SourceEcosystem::Blender => match convert_blender_zip(&path, &options) {
+                    Ok(res) => {
+                        self.source_path = Some(path.clone());
+                        self.source_code = res.python_code.clone();
+                        self.extra_files.clear();
+                        self.manifest_draft = res.manifest.clone();
+                        self.raw_manifest_text =
+                            serde_json::to_string_pretty(&res.manifest).unwrap_or_default();
+                        self.selected_ecosystem = SourceEcosystem::Blender;
+                        self.status_message = format!(
+                            "Successfully converted Blender zip addon: '{}'",
+                            res.manifest.name
+                        );
+                        self.is_error_status = false;
+                        self.conversion = Some(res);
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Failed to convert Blender zip: {e}");
+                        self.is_error_status = true;
+                    }
+                },
                 _ => {
                     // Try AddonPackage or ZBrush fallback
                     if let Ok(pkg) = AddonPackage::open(&path) {
@@ -266,7 +261,10 @@ impl OxyConvertApp {
                         self.status_message = format!("Opened package: '{}'", pkg.manifest.name);
                         self.is_error_status = false;
                         let wasm_def = pkg.wat_script.map(|w| {
-                            crate::converters::wasm::WasmPluginDefinition::from_source(&w, &pkg.manifest)
+                            crate::converters::wasm::WasmPluginDefinition::from_source(
+                                &w,
+                                &pkg.manifest,
+                            )
                         });
                         self.conversion = Some(ConversionResult {
                             manifest: pkg.manifest,
@@ -284,11 +282,14 @@ impl OxyConvertApp {
                         self.raw_manifest_text =
                             serde_json::to_string_pretty(&res.manifest).unwrap_or_default();
                         self.selected_ecosystem = SourceEcosystem::Zbrush;
-                        self.status_message = format!("Converted ZBrush archive: '{}'", res.manifest.name);
+                        self.status_message =
+                            format!("Converted ZBrush archive: '{}'", res.manifest.name);
                         self.is_error_status = false;
                         self.conversion = Some(res);
                     } else {
-                        self.status_message = "Could not parse zip archive. No supported plugin files found inside.".into();
+                        self.status_message =
+                            "Could not parse zip archive. No supported plugin files found inside."
+                                .into();
                         self.is_error_status = true;
                     }
                 }
@@ -298,7 +299,10 @@ impl OxyConvertApp {
 
         // 3. Compiled ZBrush binary (.zsc)
         if ext == "zsc" {
-            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("plugin.zsc");
+            let filename = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("plugin.zsc");
             match fs::read(&path) {
                 Ok(bytes) => {
                     let options = ConversionOptions::default();
@@ -310,7 +314,10 @@ impl OxyConvertApp {
                     self.raw_manifest_text =
                         serde_json::to_string_pretty(&res.manifest).unwrap_or_default();
                     self.selected_ecosystem = SourceEcosystem::Zbrush;
-                    self.status_message = format!("Converted compiled ZBrush plugin (.zsc): '{}'", res.manifest.name);
+                    self.status_message = format!(
+                        "Converted compiled ZBrush plugin (.zsc): '{}'",
+                        res.manifest.name
+                    );
                     self.is_error_status = false;
                     self.conversion = Some(res);
                 }
@@ -368,10 +375,10 @@ impl OxyConvertApp {
         };
 
         let mut package = AddonPackage::new(manifest, &res.python_code);
-        if self.runtime_mode == crate::converters::wasm::PluginRuntime::Wasm {
-            if let Some(def) = &res.wasm_definition {
-                package.wat_script = Some(def.wat_code.clone());
-            }
+        if self.runtime_mode == crate::converters::wasm::PluginRuntime::Wasm
+            && let Some(def) = &res.wasm_definition
+        {
+            package.wat_script = Some(def.wat_code.clone());
         }
         package.extra_files = self.extra_files.clone();
         match package.save_to_archive(&target_path) {
@@ -407,10 +414,10 @@ impl OxyConvertApp {
         };
 
         let mut package = AddonPackage::new(manifest, &res.python_code);
-        if self.runtime_mode == crate::converters::wasm::PluginRuntime::Wasm {
-            if let Some(def) = &res.wasm_definition {
-                package.wat_script = Some(def.wat_code.clone());
-            }
+        if self.runtime_mode == crate::converters::wasm::PluginRuntime::Wasm
+            && let Some(def) = &res.wasm_definition
+        {
+            package.wat_script = Some(def.wat_code.clone());
         }
         package.extra_files = self.extra_files.clone();
         match install_addon(&package, false, true) {
@@ -468,10 +475,10 @@ impl eframe::App for OxyConvertApp {
                                 &["txt", "zsc", "py", "js", "json", "oxyaddon", "zip"],
                             )
                             .pick_file()
-                        {
-                            self.load_file(path);
-                            ui.close();
-                        }
+                    {
+                        self.load_file(path);
+                        ui.close();
+                    }
 
                     ui.menu_button("Load Example", |ui| {
                         if ui.button("ZBrush: Dynamesh & Decimate").clicked() {
@@ -515,8 +522,7 @@ impl eframe::App for OxyConvertApp {
                     ui.separator();
                     if ui.button("Save .oxyaddon Package As…\tCtrl+S").clicked() {
                         let stem = self.manifest_draft.safe_stem();
-                        self.file_dialog =
-                            InAppFileDialog::save_file(&format!("{stem}.oxyaddon"));
+                        self.file_dialog = InAppFileDialog::save_file(&format!("{stem}.oxyaddon"));
                         ui.close();
                     }
 
@@ -540,7 +546,10 @@ impl eframe::App for OxyConvertApp {
                     ui.separator();
                     ui.label(RichText::new("Force Ecosystem").weak());
                     for eco in SourceEcosystem::ALL {
-                        if ui.selectable_value(&mut self.selected_ecosystem, eco, eco.display_name()).clicked() {
+                        if ui
+                            .selectable_value(&mut self.selected_ecosystem, eco, eco.display_name())
+                            .clicked()
+                        {
                             self.auto_detect = false;
                             self.trigger_conversion();
                             ui.close();
@@ -566,11 +575,11 @@ impl eframe::App for OxyConvertApp {
                         self.right_tab = RightTab::InstalledManager;
                         ui.close();
                     }
-                    if let Some(dir) = oxybrush_plugins_dir() {
-                        if ui.button("Open OxyBrush Plugins Folder…").clicked() {
-                            let _ = rfd::FileDialog::new().set_directory(&dir).pick_folder();
-                            ui.close();
-                        }
+                    if let Some(dir) = oxybrush_plugins_dir()
+                        && ui.button("Open OxyBrush Plugins Folder…").clicked()
+                    {
+                        let _ = rfd::FileDialog::new().set_directory(&dir).pick_folder();
+                        ui.close();
                     }
                 });
 
@@ -635,7 +644,11 @@ impl eframe::App for OxyConvertApp {
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("Open / Import…").on_hover_text("Open or import a script, .zsc, or .zip archive").clicked() {
+                    if ui
+                        .button("Open / Import…")
+                        .on_hover_text("Open or import a script, .zsc, or .zip archive")
+                        .clicked()
+                    {
                         self.file_dialog = InAppFileDialog::open_file();
                     }
 
@@ -646,17 +659,20 @@ impl eframe::App for OxyConvertApp {
                         self.trigger_conversion();
                     }
 
-                    if ui.button("Save Package…")
+                    if ui
+                        .button("Save Package…")
                         .on_hover_text("Save converted addon to .oxyaddon archive file")
                         .clicked()
                     {
                         let stem = self.manifest_draft.safe_stem();
-                        self.file_dialog =
-                            InAppFileDialog::save_file(&format!("{stem}.oxyaddon"));
+                        self.file_dialog = InAppFileDialog::save_file(&format!("{stem}.oxyaddon"));
                     }
 
-                    if ui.button("Install to OxyBrush")
-                        .on_hover_text("Deploy addon directly to your local OxyBrush plugins folder")
+                    if ui
+                        .button("Install to OxyBrush")
+                        .on_hover_text(
+                            "Deploy addon directly to your local OxyBrush plugins folder",
+                        )
                         .clicked()
                     {
                         self.install_to_oxybrush();
@@ -811,8 +827,16 @@ impl eframe::App for OxyConvertApp {
                     ui.set_width(ui.available_width());
 
                     ui.horizontal(|ui| {
-                        ui.selectable_value(&mut self.right_tab, RightTab::PythonCode, "🐍 main.py");
-                        ui.selectable_value(&mut self.right_tab, RightTab::WasmCode, "⚡ plugin.wat (Wasm)");
+                        ui.selectable_value(
+                            &mut self.right_tab,
+                            RightTab::PythonCode,
+                            "🐍 main.py",
+                        );
+                        ui.selectable_value(
+                            &mut self.right_tab,
+                            RightTab::WasmCode,
+                            "⚡ plugin.wat (Wasm)",
+                        );
                         ui.selectable_value(
                             &mut self.right_tab,
                             RightTab::Manifest,

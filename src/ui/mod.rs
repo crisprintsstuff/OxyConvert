@@ -7,4 +7,4 @@ pub mod widgets;
 
 pub use app::OxyConvertApp;
 pub use file_dialog::InAppFileDialog;
-pub use theme::{apply_oxy_theme, AccentPreset, ThemePreset};
+pub use theme::{AccentPreset, ThemePreset, apply_oxy_theme};

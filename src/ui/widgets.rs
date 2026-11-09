@@ -8,11 +8,9 @@ pub const OXY_CLAY_ACCENT: Color32 = Color32::from_rgb(0xE0, 0x7A, 0x4F);
 /// Render a badge chip with background color and text.
 pub fn badge_chip(ui: &mut Ui, text: &str, bg: Color32, fg: Color32) {
     let padding = vec2(6.0, 2.0);
-    let galley = ui.painter().layout_no_wrap(
-        text.to_string(),
-        egui::FontId::proportional(11.0),
-        fg,
-    );
+    let galley =
+        ui.painter()
+            .layout_no_wrap(text.to_string(), egui::FontId::proportional(11.0), fg);
     let size = galley.size() + padding * 2.0;
     let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::hover());
 
@@ -22,14 +20,10 @@ pub fn badge_chip(ui: &mut Ui, text: &str, bg: Color32, fg: Color32) {
 
 /// A button styled as an OxyBrush primary action button.
 pub fn primary_button(ui: &mut Ui, label: &str, accent: Color32) -> Response {
-    let button = egui::Button::new(
-        RichText::new(label)
-            .strong()
-            .color(Color32::WHITE),
-    )
-    .fill(accent)
-    .corner_radius(CornerRadius::same(4))
-    .min_size(vec2(120.0, 28.0));
+    let button = egui::Button::new(RichText::new(label).strong().color(Color32::WHITE))
+        .fill(accent)
+        .corner_radius(CornerRadius::same(4))
+        .min_size(vec2(120.0, 28.0));
 
     ui.add(button)
 }
@@ -72,7 +66,11 @@ pub fn alert_box(ui: &mut Ui, text: &str, is_error: bool) {
         .inner_margin(Margin::symmetric(10, 6))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(if is_error { "⚠" } else { "✔" }).color(fg).strong());
+                ui.label(
+                    RichText::new(if is_error { "⚠" } else { "✔" })
+                        .color(fg)
+                        .strong(),
+                );
                 ui.label(RichText::new(text).color(fg));
             });
         });

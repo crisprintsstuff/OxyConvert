@@ -23,9 +23,7 @@ impl ScriptConverter for ZBrushConverter {
         let addon_id = options.addon_id.clone().unwrap_or_else(|| {
             format!(
                 "com.oxybrush.zbrush.{}",
-                addon_name
-                    .to_lowercase()
-                    .replace([' ', '-', ':', '.'], "_")
+                addon_name.to_lowercase().replace([' ', '-', ':', '.'], "_")
             )
         });
 
@@ -47,9 +45,7 @@ impl ScriptConverter for ZBrushConverter {
             .or(meta.description)
             .unwrap_or_else(|| "Converted from ZBrush ZScript to OxyBrush .oxyaddon".to_string());
 
-        let category = options
-            .category
-            .unwrap_or(detect_zscript_category(source));
+        let category = options.category.unwrap_or(detect_zscript_category(source));
 
         // 2. Parse commands and transpile to Python
         let python_body = transpile_zscript_body(
@@ -121,7 +117,11 @@ if __name__ == "__main__":
             source_ecosystem: SourceEcosystem::Zbrush,
             min_oxybrush_version: "0.5.0".to_string(),
             tags: vec!["zbrush".into(), "converted".into(), "sculpt".into()],
-            permissions: vec!["scene:read".into(), "scene:modify".into(), "mesh:sculpt".into()],
+            permissions: vec![
+                "scene:read".into(),
+                "scene:modify".into(),
+                "mesh:sculpt".into(),
+            ],
             homepage: None,
             license: Some("MIT".into()),
             ui: UiBinding {
@@ -135,7 +135,9 @@ if __name__ == "__main__":
         };
 
         let wasm_def = if options.runtime == crate::converters::wasm::PluginRuntime::Wasm {
-            Some(crate::converters::wasm::WasmPluginDefinition::from_source(source, &manifest))
+            Some(crate::converters::wasm::WasmPluginDefinition::from_source(
+                source, &manifest,
+            ))
         } else {
             None
         };
@@ -167,17 +169,12 @@ pub fn convert_zbrush_zsc(
 
     let clean_name = format_title_from_stem(stem);
 
-    let addon_name = options
-        .addon_name
-        .clone()
-        .unwrap_or(clean_name);
+    let addon_name = options.addon_name.clone().unwrap_or(clean_name);
 
     let addon_id = options.addon_id.clone().unwrap_or_else(|| {
         format!(
             "com.oxybrush.zbrush.{}",
-            addon_name
-                .to_lowercase()
-                .replace([' ', '-', ':', '.'], "_")
+            addon_name.to_lowercase().replace([' ', '-', ':', '.'], "_")
         )
     });
 
@@ -191,19 +188,22 @@ pub fn convert_zbrush_zsc(
         .clone()
         .unwrap_or_else(|| "1.0.0".to_string());
 
-    let addon_description = options
-        .addon_description
-        .clone()
-        .unwrap_or_else(|| format!("Converted from compiled ZBrush plugin ({filename}) to OxyBrush .oxyaddon"));
+    let addon_description = options.addon_description.clone().unwrap_or_else(|| {
+        format!("Converted from compiled ZBrush plugin ({filename}) to OxyBrush .oxyaddon")
+    });
 
     // Check if it's a valid ZSC header
     if bytes.starts_with(b"ZBrush File") {
         mapped_calls.push("Verified Pixologic ZBrush compiled binary (.zsc) header".into());
     } else {
-        warnings.push("File has .zsc extension but does not begin with standard ZBrush magic bytes".into());
+        warnings.push(
+            "File has .zsc extension but does not begin with standard ZBrush magic bytes".into(),
+        );
     }
 
-    mapped_calls.push(format!("Extracted ZBrush plugin entrypoint for '{addon_name}'"));
+    mapped_calls.push(format!(
+        "Extracted ZBrush plugin entrypoint for '{addon_name}'"
+    ));
 
     let full_script = format!(
         r#""""
@@ -286,7 +286,9 @@ if __name__ == "__main__":
     };
 
     let wasm_def = if options.runtime == crate::converters::wasm::PluginRuntime::Wasm {
-        Some(crate::converters::wasm::WasmPluginDefinition::from_source(filename, &manifest))
+        Some(crate::converters::wasm::WasmPluginDefinition::from_source(
+            filename, &manifest,
+        ))
     } else {
         None
     };
@@ -306,7 +308,13 @@ if __name__ == "__main__":
 pub fn convert_zbrush_zip(
     zip_path: &std::path::Path,
     options: &ConversionOptions,
-) -> Result<(ConversionResult, std::collections::BTreeMap<String, Vec<u8>>), String> {
+) -> Result<
+    (
+        ConversionResult,
+        std::collections::BTreeMap<String, Vec<u8>>,
+    ),
+    String,
+> {
     use std::io::Read;
     let file = std::fs::File::open(zip_path).map_err(|e| format!("Could not open zip: {e}"))?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Invalid zip: {e}"))?;
@@ -330,7 +338,8 @@ pub fn convert_zbrush_zip(
 
         if lower.ends_with(".zsc") {
             zsc_files.push((name.clone(), buf.clone()));
-        } else if lower.ends_with(".txt") && (lower.contains("readme") || lower.contains("read_me")) {
+        } else if lower.ends_with(".txt") && (lower.contains("readme") || lower.contains("read_me"))
+        {
             readme_content = String::from_utf8(buf.clone()).ok();
         } else if lower.ends_with("version.txt") {
             version_content = String::from_utf8(buf.clone()).ok();
@@ -372,16 +381,16 @@ pub fn convert_zbrush_zip(
         }
     }
 
-    if let Some(rm) = readme_content {
-        if extracted_desc.is_none() {
-            for line in rm.lines().take(20) {
-                let l = line.trim();
-                if !l.is_empty() && !l.starts_with('_') && !l.starts_with('-') {
-                    if extracted_name.is_none() {
-                        extracted_name = Some(l.to_string());
-                    } else if extracted_desc.is_none() && l != extracted_name.as_deref().unwrap_or("") {
-                        extracted_desc = Some(l.to_string());
-                    }
+    if let Some(rm) = readme_content
+        && extracted_desc.is_none()
+    {
+        for line in rm.lines().take(20) {
+            let l = line.trim();
+            if !l.is_empty() && !l.starts_with('_') && !l.starts_with('-') {
+                if extracted_name.is_none() {
+                    extracted_name = Some(l.to_string());
+                } else if extracted_desc.is_none() && l != extracted_name.as_deref().unwrap_or("") {
+                    extracted_desc = Some(l.to_string());
                 }
             }
         }
@@ -428,7 +437,7 @@ pub fn convert_zbrush_zip(
     if opts.addon_name.is_none() {
         opts.addon_name = extracted_name.or(Some(clean_title));
     }
-    let res = convert_zbrush_zsc(&[], &zip_stem, &opts);
+    let res = convert_zbrush_zsc(&[], zip_stem, &opts);
     Ok((res, extra_files))
 }
 
@@ -503,7 +512,11 @@ fn extract_zscript_metadata(source: &str) -> ZScriptMetadata {
 
 fn detect_zscript_category(source: &str) -> AddonCategory {
     let lower = source.to_lowercase();
-    if lower.contains("decimat") || lower.contains("dynamesh") || lower.contains("divide") || lower.contains("remesh") {
+    if lower.contains("decimat")
+        || lower.contains("dynamesh")
+        || lower.contains("divide")
+        || lower.contains("remesh")
+    {
         AddonCategory::Topology
     } else if lower.contains("export") || lower.contains("import") || lower.contains("save") {
         AddonCategory::Pipeline
@@ -543,7 +556,10 @@ fn transpile_zscript_body(
         // Comments
         if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with(';') {
             if include_comments {
-                out_lines.push(format!("# {}", trimmed.trim_start_matches(['/', '*', ';']).trim()));
+                out_lines.push(format!(
+                    "# {}",
+                    trimmed.trim_start_matches(['/', '*', ';']).trim()
+                ));
             }
             continue;
         }
@@ -552,7 +568,9 @@ fn transpile_zscript_body(
         if let Some(caps) = filenameset_re.captures(trimmed) {
             let filename = caps.get(1).unwrap().as_str().to_string();
             last_file_name_set = Some(filename.clone());
-            mapped_calls.push(format!("[FileNameSetNext, \"{filename}\"] -> staged file path"));
+            mapped_calls.push(format!(
+                "[FileNameSetNext, \"{filename}\"] -> staged file path"
+            ));
             continue;
         }
 
@@ -577,10 +595,14 @@ fn transpile_zscript_body(
         if let Some(caps) = subtool_select_re.captures(trimmed) {
             let arg = caps.get(1).unwrap().as_str().trim().trim_matches('"');
             if let Ok(idx) = arg.parse::<i32>() {
-                mapped_calls.push(format!("[SubToolSelect, {idx}] -> app.select_piece(index={idx})"));
+                mapped_calls.push(format!(
+                    "[SubToolSelect, {idx}] -> app.select_piece(index={idx})"
+                ));
                 out_lines.push(format!("app.select_piece(index={idx})"));
             } else {
-                mapped_calls.push(format!("[SubToolSelect, \"{arg}\"] -> app.select_piece(name=\"{arg}\")"));
+                mapped_calls.push(format!(
+                    "[SubToolSelect, \"{arg}\"] -> app.select_piece(name=\"{arg}\")"
+                ));
                 out_lines.push(format!("app.select_piece(name=\"{arg}\")"));
             }
             continue;
@@ -606,8 +628,12 @@ fn transpile_zscript_body(
         // CanvasStroke
         if let Some(_caps) = stroke_re.captures(trimmed) {
             mapped_calls.push("[CanvasStroke, ...] -> app.apply_stroke(...)".to_string());
-            out_lines.push("# Simulated ZBrush canvas stroke mapped to OxyBrush stroke".to_string());
-            out_lines.push("app.apply_stroke(points=[[0.0, 0.0, 0.0], [0.1, 0.1, 0.0]], space='world')".to_string());
+            out_lines
+                .push("# Simulated ZBrush canvas stroke mapped to OxyBrush stroke".to_string());
+            out_lines.push(
+                "app.apply_stroke(points=[[0.0, 0.0, 0.0], [0.1, 0.1, 0.0]], space='world')"
+                    .to_string(),
+            );
             continue;
         }
 
@@ -647,7 +673,8 @@ fn map_ipress(
     }
     if lower.contains("lower res") || lower.contains(":sdiv -1") {
         mapped_calls.push("Subdivision down -> app.subdivide()".to_string());
-        return "# OxyBrush active multires level adjust\nprint('Adjusted multires level')".to_string();
+        return "# OxyBrush active multires level adjust\nprint('Adjusted multires level')"
+            .to_string();
     }
 
     // Remeshing / Dynamesh / ClayPolish
@@ -820,8 +847,14 @@ mod tests {
         assert!(res.python_code.contains("app.set_brush(strength=0.80)"));
         assert!(res.python_code.contains("app.select_brush('Clay')"));
         assert!(res.python_code.contains("app.subdivide(smooth=True)"));
-        assert!(res.python_code.contains("app.voxel_remesh(voxel_size=0.03)"));
+        assert!(
+            res.python_code
+                .contains("app.voxel_remesh(voxel_size=0.03)")
+        );
         assert!(res.python_code.contains("app.decimate(keep_percent=20.0)"));
-        assert!(res.python_code.contains("print(\"[ZScript Note] Finished!\")"));
+        assert!(
+            res.python_code
+                .contains("print(\"[ZScript Note] Finished!\")")
+        );
     }
 }

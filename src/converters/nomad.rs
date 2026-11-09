@@ -18,7 +18,12 @@ impl ScriptConverter for NomadConverter {
         let (meta, python_body) = if is_json {
             parse_nomad_json(source, &mut warnings, &mut mapped_calls)
         } else {
-            parse_nomad_js(source, &mut warnings, &mut mapped_calls, options.include_original_as_comment)
+            parse_nomad_js(
+                source,
+                &mut warnings,
+                &mut mapped_calls,
+                options.include_original_as_comment,
+            )
         };
 
         let addon_name = options
@@ -30,9 +35,7 @@ impl ScriptConverter for NomadConverter {
         let addon_id = options.addon_id.clone().unwrap_or_else(|| {
             format!(
                 "com.oxybrush.nomad.{}",
-                addon_name
-                    .to_lowercase()
-                    .replace([' ', '-', ':', '.'], "_")
+                addon_name.to_lowercase().replace([' ', '-', ':', '.'], "_")
             )
         });
 
@@ -52,7 +55,9 @@ impl ScriptConverter for NomadConverter {
             .addon_description
             .clone()
             .or(meta.description)
-            .unwrap_or_else(|| "Converted from Nomad Sculpt script to OxyBrush .oxyaddon".to_string());
+            .unwrap_or_else(|| {
+                "Converted from Nomad Sculpt script to OxyBrush .oxyaddon".to_string()
+            });
 
         let category = options.category.unwrap_or(AddonCategory::Sculpting);
 
@@ -117,7 +122,11 @@ if __name__ == "__main__":
             source_ecosystem: SourceEcosystem::Nomad,
             min_oxybrush_version: "0.5.0".to_string(),
             tags: vec!["nomad".into(), "converted".into(), "sculpt".into()],
-            permissions: vec!["scene:read".into(), "scene:modify".into(), "mesh:sculpt".into()],
+            permissions: vec![
+                "scene:read".into(),
+                "scene:modify".into(),
+                "mesh:sculpt".into(),
+            ],
             homepage: None,
             license: Some("MIT".into()),
             ui: UiBinding {
@@ -131,7 +140,9 @@ if __name__ == "__main__":
         };
 
         let wasm_def = if options.runtime == crate::converters::wasm::PluginRuntime::Wasm {
-            Some(crate::converters::wasm::WasmPluginDefinition::from_source(source, &manifest))
+            Some(crate::converters::wasm::WasmPluginDefinition::from_source(
+                source, &manifest,
+            ))
         } else {
             None
         };
@@ -179,7 +190,9 @@ fn parse_nomad_json(
             // Extract tool
             if let Some(tool) = v.get("tool").and_then(|t| t.as_str()) {
                 let oxy_brush = map_nomad_tool(tool);
-                mapped_calls.push(format!("Nomad tool '{tool}' -> app.select_brush('{oxy_brush}')"));
+                mapped_calls.push(format!(
+                    "Nomad tool '{tool}' -> app.select_brush('{oxy_brush}')"
+                ));
                 out_lines.push(format!("app.select_brush('{oxy_brush}')"));
             }
 
@@ -188,21 +201,31 @@ fn parse_nomad_json(
             let intensity = v.get("intensity").and_then(|i| i.as_f64());
             if radius.is_some() || intensity.is_some() {
                 let r_str = radius.map(|r| format!("size={r}")).unwrap_or_default();
-                let i_str = intensity.map(|i| format!("strength={i}")).unwrap_or_default();
-                let args = [r_str, i_str].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(", ");
+                let i_str = intensity
+                    .map(|i| format!("strength={i}"))
+                    .unwrap_or_default();
+                let args = [r_str, i_str]
+                    .into_iter()
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 mapped_calls.push(format!("Nomad brush settings -> app.set_brush({args})"));
                 out_lines.push(format!("app.set_brush({args})"));
             }
 
             // Remesh
             if let Some(remesh) = v.get("remesh").and_then(|r| r.as_f64()) {
-                mapped_calls.push(format!("Nomad remesh {remesh} -> app.voxel_remesh(voxel_size={remesh})"));
+                mapped_calls.push(format!(
+                    "Nomad remesh {remesh} -> app.voxel_remesh(voxel_size={remesh})"
+                ));
                 out_lines.push(format!("app.voxel_remesh(voxel_size={remesh})"));
             }
 
             // Symmetry
             if let Some(sym_x) = v.get("symmetryX").and_then(|s| s.as_bool()) {
-                mapped_calls.push(format!("Nomad symmetryX {sym_x} -> app.set_symmetry(x={sym_x})"));
+                mapped_calls.push(format!(
+                    "Nomad symmetryX {sym_x} -> app.set_symmetry(x={sym_x})"
+                ));
                 out_lines.push(format!("app.set_symmetry(x={sym_x})"));
             }
         }
@@ -214,7 +237,10 @@ fn parse_nomad_json(
     if out_lines.is_empty() {
         out_lines.push("# Inspect active Nomad-converted mesh:".to_string());
         out_lines.push("stats = app.get_mesh_stats()".to_string());
-        out_lines.push("print(f'Piece count: {stats.piece_count}, triangles: {stats.triangle_count}')".to_string());
+        out_lines.push(
+            "print(f'Piece count: {stats.piece_count}, triangles: {stats.triangle_count}')"
+                .to_string(),
+        );
     }
 
     (meta, out_lines.join("\n"))
@@ -241,7 +267,8 @@ fn parse_nomad_js(
         }
     }
 
-    let remesh_re = Regex::new(r"nomad\.(?:topology\.)?remesh\s*\(\s*\{?[^0-9.]*([0-9.]+)?").unwrap();
+    let remesh_re =
+        Regex::new(r"nomad\.(?:topology\.)?remesh\s*\(\s*\{?[^0-9.]*([0-9.]+)?").unwrap();
     let decimate_re = Regex::new(r"nomad\.decimate\s*\(\s*\{?[^0-9.]*([0-9.]+)?").unwrap();
     let brush_re = Regex::new(r#"nomad\.(?:setBrush|tool)\s*\(?\s*['"]([^'"]+)['"]"#).unwrap();
     let primitive_re = Regex::new(r#"nomad\.addPrimitive\s*\(\s*['"]([^'"]+)['"]"#).unwrap();
@@ -255,7 +282,10 @@ fn parse_nomad_js(
 
         if trimmed.starts_with("//") || trimmed.starts_with("/*") {
             if include_comments {
-                out_lines.push(format!("# {}", trimmed.trim_start_matches(['/', '*']).trim()));
+                out_lines.push(format!(
+                    "# {}",
+                    trimmed.trim_start_matches(['/', '*']).trim()
+                ));
             }
             continue;
         }
@@ -263,7 +293,9 @@ fn parse_nomad_js(
         // Remesh
         if let Some(caps) = remesh_re.captures(trimmed) {
             let size = caps.get(1).map(|m| m.as_str()).unwrap_or("0.03");
-            mapped_calls.push(format!("nomad.remesh -> app.voxel_remesh(voxel_size={size})"));
+            mapped_calls.push(format!(
+                "nomad.remesh -> app.voxel_remesh(voxel_size={size})"
+            ));
             out_lines.push(format!("app.voxel_remesh(voxel_size={size})"));
             continue;
         }
@@ -271,7 +303,9 @@ fn parse_nomad_js(
         // Decimate
         if let Some(caps) = decimate_re.captures(trimmed) {
             let ratio = caps.get(1).map(|m| m.as_str()).unwrap_or("50.0");
-            mapped_calls.push(format!("nomad.decimate -> app.decimate(keep_percent={ratio})"));
+            mapped_calls.push(format!(
+                "nomad.decimate -> app.decimate(keep_percent={ratio})"
+            ));
             out_lines.push(format!("app.decimate(keep_percent={ratio})"));
             continue;
         }
@@ -280,7 +314,9 @@ fn parse_nomad_js(
         if let Some(caps) = brush_re.captures(trimmed) {
             let bname = caps.get(1).unwrap().as_str();
             let oxy = map_nomad_tool(bname);
-            mapped_calls.push(format!("nomad.setBrush('{bname}') -> app.select_brush('{oxy}')"));
+            mapped_calls.push(format!(
+                "nomad.setBrush('{bname}') -> app.select_brush('{oxy}')"
+            ));
             out_lines.push(format!("app.select_brush('{oxy}')"));
             continue;
         }
@@ -288,7 +324,9 @@ fn parse_nomad_js(
         // Primitive
         if let Some(caps) = primitive_re.captures(trimmed) {
             let prim = caps.get(1).unwrap().as_str();
-            mapped_calls.push(format!("nomad.addPrimitive('{prim}') -> app.add_primitive('{prim}')"));
+            mapped_calls.push(format!(
+                "nomad.addPrimitive('{prim}') -> app.add_primitive('{prim}')"
+            ));
             out_lines.push(format!("app.add_primitive('{prim}')"));
             continue;
         }
@@ -296,7 +334,9 @@ fn parse_nomad_js(
         // Export
         if let Some(caps) = export_re.captures(trimmed) {
             let path = caps.get(1).unwrap().as_str();
-            mapped_calls.push(format!("nomad.export('{path}') -> app.export_mesh('{path}')"));
+            mapped_calls.push(format!(
+                "nomad.export('{path}') -> app.export_mesh('{path}')"
+            ));
             out_lines.push(format!("app.export_mesh('{path}')"));
             continue;
         }
@@ -322,7 +362,9 @@ fn parse_nomad_js(
 
         // Console log
         if trimmed.starts_with("console.log(") {
-            let log_text = trimmed.trim_start_matches("console.log(").trim_end_matches([')', ';']);
+            let log_text = trimmed
+                .trim_start_matches("console.log(")
+                .trim_end_matches([')', ';']);
             out_lines.push(format!("print({log_text})"));
             continue;
         }
@@ -402,7 +444,10 @@ mod tests {
         assert_eq!(res.manifest.name, "Organic Remesh Pass");
         assert_eq!(res.manifest.author, "NomadSculptor");
         assert!(res.python_code.contains("app.select_brush('Clay')"));
-        assert!(res.python_code.contains("app.voxel_remesh(voxel_size=0.04)"));
+        assert!(
+            res.python_code
+                .contains("app.voxel_remesh(voxel_size=0.04)")
+        );
         assert!(res.python_code.contains("app.decimate(keep_percent=25)"));
         assert!(res.python_code.contains("print(\"Nomad pass complete\")"));
     }
@@ -424,7 +469,13 @@ mod tests {
         assert_eq!(res.manifest.name, "Heavy Clay Tool");
         assert_eq!(res.manifest.author, "NomadPro");
         assert!(res.python_code.contains("app.select_brush('Clay')"));
-        assert!(res.python_code.contains("app.set_brush(size=40, strength=0.85)"));
-        assert!(res.python_code.contains("app.voxel_remesh(voxel_size=0.02)"));
+        assert!(
+            res.python_code
+                .contains("app.set_brush(size=40, strength=0.85)")
+        );
+        assert!(
+            res.python_code
+                .contains("app.voxel_remesh(voxel_size=0.02)")
+        );
     }
 }

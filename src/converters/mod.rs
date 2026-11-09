@@ -8,8 +8,7 @@ pub mod zbrush;
 use crate::package::manifest::{AddonCategory, AddonManifest, SourceEcosystem};
 
 /// Options for fine-tuning the conversion process.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ConversionOptions {
     pub addon_id: Option<String>,
     pub addon_name: Option<String>,
@@ -20,7 +19,6 @@ pub struct ConversionOptions {
     pub include_original_as_comment: bool,
     pub runtime: wasm::PluginRuntime,
 }
-
 
 /// Result of converting an external script to `.oxyaddon`.
 #[derive(Debug, Clone)]
@@ -95,15 +93,18 @@ pub fn detect_ecosystem(source: &str, filename: Option<&str>) -> SourceEcosystem
         }
         if lower.ends_with(".txt") {
             // Check if txt contains ZScript syntax
-            if source.contains("[IButton") || source.contains("[IPress") || source.contains("[VarSet") || source.contains("ZBrush") {
+            if source.contains("[IButton")
+                || source.contains("[IPress")
+                || source.contains("[VarSet")
+                || source.contains("ZBrush")
+            {
                 return SourceEcosystem::Zbrush;
             }
         } else if lower.ends_with(".js") || (lower.ends_with(".json") && source.contains("nomad")) {
             return SourceEcosystem::Nomad;
-        } else if lower.ends_with(".py")
-            && (source.contains("bpy") || source.contains("bl_info")) {
-                return SourceEcosystem::Blender;
-            }
+        } else if lower.ends_with(".py") && (source.contains("bpy") || source.contains("bl_info")) {
+            return SourceEcosystem::Blender;
+        }
     }
 
     // 2. Content-based heuristics
