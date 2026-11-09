@@ -10,6 +10,7 @@ use zip::{ZipArchive, ZipWriter};
 
 pub const ADDON_EXTENSION: &str = "oxyaddon";
 pub const MANIFEST_FILENAME: &str = "manifest.json";
+pub const PLUGIN_JSON_FILENAME: &str = "plugin.json";
 pub const DEFAULT_ENTRY_POINT: &str = "main.py";
 
 #[derive(Debug)]
@@ -110,6 +111,12 @@ impl AddonPackage {
 
             if name == MANIFEST_FILENAME {
                 manifest_bytes = Some(buf);
+            } else if name == PLUGIN_JSON_FILENAME {
+                // If manifest.json is not present, plugin_json can be fallback
+                if manifest_bytes.is_none() {
+                    manifest_bytes = Some(buf.clone());
+                }
+                files.insert(name, buf);
             } else {
                 files.insert(name, buf);
             }
@@ -194,7 +201,12 @@ impl AddonPackage {
             .compression_method(zip::CompressionMethod::Deflated)
             .unix_permissions(0o644);
 
-        // 1. Write manifest.json
+        // 1. Write plugin.json (native OxyBrush manifest)
+        let plugin_json_content = self.manifest.to_plugin_json();
+        zip.start_file(PLUGIN_JSON_FILENAME, options)?;
+        zip.write_all(plugin_json_content.as_bytes())?;
+
+        // 1b. Write manifest.json (extended OxyConvert manifest)
         zip.start_file(MANIFEST_FILENAME, options)?;
         let manifest_json = serde_json::to_string_pretty(&self.manifest)?;
         zip.write_all(manifest_json.as_bytes())?;
@@ -223,6 +235,10 @@ impl AddonPackage {
     pub fn unpack_to_directory(&self, dest: impl AsRef<Path>) -> Result<(), BundleError> {
         let d = dest.as_ref();
         fs::create_dir_all(d)?;
+
+        // plugin.json (native OxyBrush manifest)
+        let plugin_json_content = self.manifest.to_plugin_json();
+        fs::write(d.join(PLUGIN_JSON_FILENAME), plugin_json_content)?;
 
         // manifest.json
         let manifest_json = serde_json::to_string_pretty(&self.manifest)?;

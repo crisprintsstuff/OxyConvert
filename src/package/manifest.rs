@@ -178,4 +178,20 @@ impl AddonManifest {
             .collect::<String>()
             .to_lowercase()
     }
+
+    /// Generate native OxyBrush `plugin.json` content matching `oxy_plugin::addon::inspect`.
+    pub fn to_plugin_json(&self) -> String {
+        let stem = self.safe_stem();
+        let value = serde_json::json!({
+            "name": self.name,
+            "id": stem,
+            "kind": "python",
+            "entry": self.entry_point,
+            "version": self.version,
+            "description": self.description,
+            "author": self.author,
+            "category": self.category.display_name(),
+        });
+        serde_json::to_string_pretty(&value).unwrap_or_default()
+    }
 }

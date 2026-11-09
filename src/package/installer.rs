@@ -76,7 +76,7 @@ pub fn oxybrush_plugins_dir() -> Option<PathBuf> {
 /// and also writes a top-level `<stem>.py` bridge if requested for seamless backward compatibility.
 pub fn install_addon(
     package: &AddonPackage,
-    as_folder: bool,
+    _as_folder: bool,
     write_py_bridge: bool,
 ) -> Result<PathBuf, io::Error> {
     let plugins_dir = oxybrush_plugins_dir().ok_or_else(|| {
@@ -90,23 +90,19 @@ pub fn install_addon(
 
     let stem = package.manifest.safe_stem();
 
-    let target_path = if as_folder {
-        let folder = plugins_dir.join(&stem);
-        package
-            .unpack_to_directory(&folder)
-            .map_err(|e| io::Error::other(e.to_string()))?;
-        folder
-    } else {
-        let archive_path = plugins_dir.join(format!("{stem}.{ADDON_EXTENSION}"));
-        package
-            .save_to_archive(&archive_path)
-            .map_err(|e| io::Error::other(e.to_string()))?;
-        archive_path
-    };
+    // 1. Unpack into folder plugins_dir/<stem>/ with plugin.json so OxyBrush discovers it directly
+    let folder = plugins_dir.join(&stem);
+    package
+        .unpack_to_directory(&folder)
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
-    // OxyBrush 0.5.0 scans for *.py files in plugins_dir. To make sure the addon immediately
-    // appears in the OxyBrush top menu even in older OxyBrush versions without needing an update,
-    // we also generate a clean bridge script with the standard OxyBrush metadata header!
+    // 2. Also save the archive package plugins_dir/<stem>.oxyaddon
+    let archive_path = plugins_dir.join(format!("{stem}.{ADDON_EXTENSION}"));
+    package
+        .save_to_archive(&archive_path)
+        .map_err(|e| io::Error::other(e.to_string()))?;
+
+    // 3. For backward compatibility with OxyBrush loose-script scanning, also write <stem>.py
     if write_py_bridge {
         let bridge_script_path = plugins_dir.join(format!("{stem}.py"));
         let header = format!(
@@ -121,7 +117,7 @@ pub fn install_addon(
         fs::write(bridge_script_path, full_script)?;
     }
 
-    Ok(target_path)
+    Ok(folder)
 }
 
 /// List all installed addons and plugins in the OxyBrush plugins directory.
