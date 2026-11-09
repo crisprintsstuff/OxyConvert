@@ -2,6 +2,7 @@
 
 pub mod blender;
 pub mod nomad;
+pub mod wasm;
 pub mod zbrush;
 
 use crate::package::manifest::{AddonCategory, AddonManifest, SourceEcosystem};
@@ -17,6 +18,7 @@ pub struct ConversionOptions {
     pub addon_description: Option<String>,
     pub category: Option<AddonCategory>,
     pub include_original_as_comment: bool,
+    pub runtime: wasm::PluginRuntime,
 }
 
 
@@ -25,6 +27,7 @@ pub struct ConversionOptions {
 pub struct ConversionResult {
     pub manifest: AddonManifest,
     pub python_code: String,
+    pub wasm_definition: Option<wasm::WasmPluginDefinition>,
     pub warnings: Vec<String>,
     pub mapped_calls: Vec<String>,
     pub source_ecosystem: SourceEcosystem,
@@ -166,9 +169,16 @@ pub fn convert_script(
                 manifest.category = cat;
             }
 
+            let wasm_def = if options.runtime == wasm::PluginRuntime::Wasm {
+                Some(wasm::WasmPluginDefinition::from_source(source, &manifest))
+            } else {
+                None
+            };
+
             ConversionResult {
                 manifest,
                 python_code: source.to_string(),
+                wasm_definition: wasm_def,
                 warnings: Vec::new(),
                 mapped_calls: vec!["Native OxyBrush SDK script passed through".to_string()],
                 source_ecosystem: SourceEcosystem::Native,

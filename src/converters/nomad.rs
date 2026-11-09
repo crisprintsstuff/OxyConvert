@@ -130,9 +130,16 @@ if __name__ == "__main__":
             ..Default::default()
         };
 
+        let wasm_def = if options.runtime == crate::converters::wasm::PluginRuntime::Wasm {
+            Some(crate::converters::wasm::WasmPluginDefinition::from_source(source, &manifest))
+        } else {
+            None
+        };
+
         ConversionResult {
             manifest,
             python_code: full_script,
+            wasm_definition: wasm_def,
             warnings,
             mapped_calls,
             source_ecosystem: SourceEcosystem::Nomad,

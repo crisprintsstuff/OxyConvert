@@ -61,6 +61,7 @@ impl From<serde_json::Error> for BundleError {
 pub struct AddonPackage {
     pub manifest: AddonManifest,
     pub main_script: String,
+    pub wat_script: Option<String>,
     pub icon_png: Option<Vec<u8>>,
     pub extra_files: BTreeMap<String, Vec<u8>>,
 }
@@ -71,6 +72,7 @@ impl AddonPackage {
         Self {
             manifest,
             main_script: main_script.into(),
+            wat_script: None,
             icon_png: None,
             extra_files: BTreeMap::new(),
         }
@@ -133,11 +135,15 @@ impl AddonPackage {
         let main_script = String::from_utf8(script_bytes)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
+        let wat_bytes = files.remove("plugin.wat").or_else(|| files.remove("plugin.wasm"));
+        let wat_script = wat_bytes.and_then(|b| String::from_utf8(b).ok());
+
         let icon_png = files.remove("icon.png");
 
         Ok(Self {
             manifest,
             main_script,
+            wat_script,
             icon_png,
             extra_files: files,
         })
@@ -168,9 +174,16 @@ impl AddonPackage {
         let mut extra_files = BTreeMap::new();
         scan_directory_files(dir, dir, &mut extra_files, &[MANIFEST_FILENAME, &manifest.entry_point, "icon.png"])?;
 
+        let wat_script = if dir.join("plugin.wat").is_file() {
+            fs::read_to_string(dir.join("plugin.wat")).ok()
+        } else {
+            None
+        };
+
         Ok(Self {
             manifest,
             main_script,
+            wat_script,
             icon_png,
             extra_files,
         })
@@ -202,7 +215,12 @@ impl AddonPackage {
             .unix_permissions(0o644);
 
         // 1. Write plugin.json (native OxyBrush manifest)
-        let plugin_json_content = self.manifest.to_plugin_json();
+        let plugin_json_content = if let Some(wat) = &self.wat_script {
+            let def = crate::converters::wasm::WasmPluginDefinition::from_source(wat, &self.manifest);
+            def.to_plugin_json(&self.manifest.safe_stem())
+        } else {
+            self.manifest.to_plugin_json()
+        };
         zip.start_file(PLUGIN_JSON_FILENAME, options)?;
         zip.write_all(plugin_json_content.as_bytes())?;
 
@@ -211,7 +229,13 @@ impl AddonPackage {
         let manifest_json = serde_json::to_string_pretty(&self.manifest)?;
         zip.write_all(manifest_json.as_bytes())?;
 
-        // 2. Write main script
+        // 2. Write WebAssembly plugin.wat if present
+        if let Some(wat) = &self.wat_script {
+            zip.start_file("plugin.wat", options)?;
+            zip.write_all(wat.as_bytes())?;
+        }
+
+        // 2b. Write main python script
         zip.start_file(&self.manifest.entry_point, options)?;
         zip.write_all(self.main_script.as_bytes())?;
 
@@ -237,12 +261,22 @@ impl AddonPackage {
         fs::create_dir_all(d)?;
 
         // plugin.json (native OxyBrush manifest)
-        let plugin_json_content = self.manifest.to_plugin_json();
+        let plugin_json_content = if let Some(wat) = &self.wat_script {
+            let def = crate::converters::wasm::WasmPluginDefinition::from_source(wat, &self.manifest);
+            def.to_plugin_json(&self.manifest.safe_stem())
+        } else {
+            self.manifest.to_plugin_json()
+        };
         fs::write(d.join(PLUGIN_JSON_FILENAME), plugin_json_content)?;
 
         // manifest.json
         let manifest_json = serde_json::to_string_pretty(&self.manifest)?;
         fs::write(d.join(MANIFEST_FILENAME), manifest_json)?;
+
+        // WebAssembly plugin.wat if present
+        if let Some(wat) = &self.wat_script {
+            fs::write(d.join("plugin.wat"), wat)?;
+        }
 
         // main script
         let script_path = d.join(&self.manifest.entry_point);

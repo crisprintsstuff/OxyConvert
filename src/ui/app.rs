@@ -22,6 +22,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightTab {
     PythonCode,
+    WasmCode,
     Manifest,
     Report,
     InstalledManager,
@@ -47,6 +48,8 @@ pub struct OxyConvertApp {
     pub manifest_draft: AddonManifest,
     pub raw_manifest_mode: bool,
     pub raw_manifest_text: String,
+
+    pub runtime_mode: crate::converters::wasm::PluginRuntime,
 
     // UI state
     pub right_tab: RightTab,
@@ -80,6 +83,7 @@ impl Default for OxyConvertApp {
             manifest_draft: res.manifest,
             raw_manifest_mode: false,
             raw_manifest_text: manifest_text,
+            runtime_mode: crate::converters::wasm::PluginRuntime::Python,
             right_tab: RightTab::PythonCode,
             status_message: "Ready. Loaded example ZBrush script.".to_string(),
             is_error_status: false,
@@ -119,7 +123,10 @@ impl OxyConvertApp {
             self.selected_ecosystem
         };
 
-        let mut options = ConversionOptions::default();
+        let mut options = ConversionOptions {
+            runtime: self.runtime_mode,
+            ..Default::default()
+        };
         if !self.manifest_draft.name.is_empty() && self.manifest_draft.name != "Untitled Addon" {
             options.addon_name = Some(self.manifest_draft.name.clone());
         }
@@ -168,9 +175,13 @@ impl OxyConvertApp {
                     self.raw_manifest_text =
                         serde_json::to_string_pretty(&pkg.manifest).unwrap_or_default();
                     self.selected_ecosystem = pkg.manifest.source_ecosystem;
+                    let wasm_def = pkg.wat_script.map(|w| {
+                        crate::converters::wasm::WasmPluginDefinition::from_source(&w, &pkg.manifest)
+                    });
                     self.conversion = Some(ConversionResult {
                         manifest: pkg.manifest.clone(),
                         python_code: pkg.main_script,
+                        wasm_definition: wasm_def,
                         warnings: Vec::new(),
                         mapped_calls: vec!["Opened native .oxyaddon package".into()],
                         source_ecosystem: pkg.manifest.source_ecosystem,
@@ -254,9 +265,13 @@ impl OxyConvertApp {
                         self.selected_ecosystem = pkg.manifest.source_ecosystem;
                         self.status_message = format!("Opened package: '{}'", pkg.manifest.name);
                         self.is_error_status = false;
+                        let wasm_def = pkg.wat_script.map(|w| {
+                            crate::converters::wasm::WasmPluginDefinition::from_source(&w, &pkg.manifest)
+                        });
                         self.conversion = Some(ConversionResult {
                             manifest: pkg.manifest,
                             python_code: pkg.main_script,
+                            wasm_definition: wasm_def,
                             warnings: Vec::new(),
                             mapped_calls: vec!["Opened package".into()],
                             source_ecosystem: SourceEcosystem::Native,
@@ -353,6 +368,11 @@ impl OxyConvertApp {
         };
 
         let mut package = AddonPackage::new(manifest, &res.python_code);
+        if self.runtime_mode == crate::converters::wasm::PluginRuntime::Wasm {
+            if let Some(def) = &res.wasm_definition {
+                package.wat_script = Some(def.wat_code.clone());
+            }
+        }
         package.extra_files = self.extra_files.clone();
         match package.save_to_archive(&target_path) {
             Ok(()) => {
@@ -387,6 +407,11 @@ impl OxyConvertApp {
         };
 
         let mut package = AddonPackage::new(manifest, &res.python_code);
+        if self.runtime_mode == crate::converters::wasm::PluginRuntime::Wasm {
+            if let Some(def) = &res.wasm_definition {
+                package.wat_script = Some(def.wat_code.clone());
+            }
+        }
         package.extra_files = self.extra_files.clone();
         match install_addon(&package, false, true) {
             Ok(p) => {
@@ -638,6 +663,23 @@ impl eframe::App for OxyConvertApp {
                     }
 
                     ui.separator();
+                    ui.label(RichText::new("Target Runtime:").weak());
+                    let prev_runtime = self.runtime_mode;
+                    egui::ComboBox::from_id_salt("runtime_select")
+                        .selected_text(self.runtime_mode.badge())
+                        .show_ui(ui, |ui| {
+                            for r in crate::converters::wasm::PluginRuntime::ALL {
+                                ui.selectable_value(&mut self.runtime_mode, r, r.display_name());
+                            }
+                        });
+                    if prev_runtime != self.runtime_mode {
+                        self.trigger_conversion();
+                        if self.runtime_mode == crate::converters::wasm::PluginRuntime::Wasm {
+                            self.right_tab = RightTab::WasmCode;
+                        }
+                    }
+
+                    ui.separator();
                     ui.label(RichText::new("Ecosystem:").weak());
                     ui.checkbox(&mut self.auto_detect, "Auto");
 
@@ -770,6 +812,7 @@ impl eframe::App for OxyConvertApp {
 
                     ui.horizontal(|ui| {
                         ui.selectable_value(&mut self.right_tab, RightTab::PythonCode, "🐍 main.py");
+                        ui.selectable_value(&mut self.right_tab, RightTab::WasmCode, "⚡ plugin.wat (Wasm)");
                         ui.selectable_value(
                             &mut self.right_tab,
                             RightTab::Manifest,
@@ -791,6 +834,7 @@ impl eframe::App for OxyConvertApp {
 
                     match self.right_tab {
                         RightTab::PythonCode => self.render_python_code_view(ui),
+                        RightTab::WasmCode => self.render_wasm_code_view(ui),
                         RightTab::Manifest => self.render_manifest_view(ui),
                         RightTab::Report => self.render_report_view(ui),
                         RightTab::InstalledManager => self.render_installed_manager(ui),
@@ -882,6 +926,46 @@ impl OxyConvertApp {
                             .code_editor(),
                     );
                 });
+        } else {
+            ui.label("No conversion generated yet.");
+        }
+    }
+
+    fn render_wasm_code_view(&mut self, ui: &mut Ui) {
+        if let Some(res) = &mut self.conversion {
+            if let Some(wasm_def) = &mut res.wasm_definition {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Target WebAssembly Text (plugin.wat):").strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("📋 Copy WAT").clicked() {
+                            ui.ctx().copy_text(wasm_def.wat_code.clone());
+                            self.status_message = "Copied WebAssembly text to clipboard!".into();
+                        }
+                    });
+                });
+
+                ui.add_space(4.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("wasm_scroll")
+                    .max_height(ui.available_height() - 10.0)
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut wasm_def.wat_code)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY)
+                                .code_editor(),
+                        );
+                    });
+            } else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(30.0);
+                    ui.label("WebAssembly code is generated when 'Target Runtime' is set to WebAssembly.");
+                    if ui.button("⚡ Generate WebAssembly Plugin").clicked() {
+                        self.runtime_mode = crate::converters::wasm::PluginRuntime::Wasm;
+                        self.trigger_conversion();
+                    }
+                });
+            }
         } else {
             ui.label("No conversion generated yet.");
         }
