@@ -141,9 +141,79 @@ oxyconvert pack unpacked_dir/ -o repacked_plugin.oxyaddon
 oxyconvert list
 ```
 
-### 6. Print the Official Specification
+### 6. Start the Suite API & MCP Server
+```bash
+# Launch the headless Suite API and MCP server
+oxyconvert api --port 8990
+
+# Or with custom authentication token
+oxyconvert api --port 8990 --token my_secure_token
+```
+
+### 7. Print the Official Specification
 ```bash
 oxyconvert spec
+```
+
+---
+
+## Suite API & Inter-Process Communication (IPC)
+
+OxyConvert provides a pure safe-Rust loopback API server (`127.0.0.1`) that allows sibling creative suite applications—including [**OxyLauncher**](https://github.com/crisprintsstuff/OxyLauncher), [**OxyBrush**](https://github.com/crisprintsstuff/OxyBrush), **OxyTools**, **OxyPixel**, and **OxyChar**—to communicate, detect ecosystems, convert scripts, inspect packages, and deploy plugins on the fly.
+
+### Auto-Discovery File
+When OxyConvert starts (either via GUI or `oxyconvert api`), it writes an active session discovery file:
+- **Linux/macOS:** `~/.local/share/OxyLabs/oxyconvert-api.json`
+- **Windows:** `%LOCALAPPDATA%\OxyLabs\oxyconvert-api.json`
+
+```json
+{
+  "app": "OxyConvert",
+  "version": "0.1.0",
+  "endpoint": "http://127.0.0.1:8990",
+  "port": 8990,
+  "token": null,
+  "pid": 12345,
+  "started_at_secs": 1731110000
+}
+```
+
+### Endpoints Reference
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/v1/status` | OxyConvert capabilities, runtimes, and installed plugin counts |
+| `POST` | `/api/v1/detect` | Detect source ecosystem (`zbrush`, `blender`, `nomad`) from code or filename |
+| `POST` | `/api/v1/convert` | Transpile scripts/archives to `.oxyaddon` (returns manifest, WAT/Python, and optional Base64 bundle) |
+| `POST` | `/api/v1/inspect` | Inspect `.oxyaddon` packages from file path or Base64 payload |
+| `POST` | `/api/v1/install` | Deploy an `.oxyaddon` package directly into OxyBrush |
+| `GET` | `/api/v1/list` | List all installed plugins in the OxyBrush plugins directory |
+| `POST` | `/api/v1/uninstall` | Remove an installed plugin from OxyBrush by ID |
+| `POST` | `/rpc` | JSON-RPC 2.0 interface (`oxc.*` methods) |
+| `POST` | `/mcp` | Model Context Protocol (MCP) server for local AI coding agents (`initialize`, `tools/list`, `tools/call`) |
+
+### Using the Rust Client Library
+Sibling suite applications written in Rust can interact with OxyConvert directly using `oxyconvert::api::OxcClient`:
+
+```rust
+use oxyconvert::api::{OxcClient, ConvertRequest};
+
+// Automatically discover running OxyConvert instance
+let client = OxcClient::discover().expect("OxyConvert is running");
+
+// Query status
+let status = client.status().unwrap();
+println!("OxyConvert status: {}", status.status);
+
+// Convert a ZScript to in-process WebAssembly
+let result = client.convert(ConvertRequest {
+    source: Some("[IButton, \"Deform\", \"Scale\", [VarSet, s, 1.2]]".into()),
+    runtime: Some("wasm".into()),
+    install_direct: Some(true),
+    ..Default::default()
+}).unwrap();
+
+println!("Transpiled into plugin: {:?}", result.manifest.unwrap().id);
 ```
 
 ---

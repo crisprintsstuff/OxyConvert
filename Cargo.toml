@@ -1,6 +1,6 @@
 [package]
 name = "oxyconvert"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Universal converter for ZBrush, Blender, and Nomad Sculpt plugins to the .oxyaddon system"
@@ -19,6 +19,7 @@ clap = { version = "4.5", features = ["derive"] }
 regex = "1.11"
 log = "0.4"
 env_logger = "0.11"
+base64 = { version = "0.23", default-features = false, features = ["alloc", "std"] }
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

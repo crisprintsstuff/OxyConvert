@@ -31,7 +31,7 @@ impl From<CliEcosystem> for SourceEcosystem {
 #[command(
     name = "oxyconvert",
     author = "OxyLabs",
-    version = "0.1.0",
+    version = "0.1.1",
     about = "Convert ZBrush, Blender, and Nomad Sculpt plugins into .oxyaddon packages for OxyBrush",
     long_about = None
 )]
@@ -110,6 +110,21 @@ pub enum Commands {
 
     /// List all currently installed addons in OxyBrush
     List,
+
+    /// Start the OxyConvert Suite API & MCP server
+    Api {
+        /// Port to bind the loopback server to (default: 8990, use 0 for random free port)
+        #[arg(short, long, default_value = "8990")]
+        port: u16,
+
+        /// Optional Bearer authorization token
+        #[arg(short, long)]
+        token: Option<String>,
+
+        /// Do not write the suite discovery file
+        #[arg(long)]
+        no_discovery: bool,
+    },
 
     /// Print the formal .oxyaddon package specification
     Spec,
@@ -284,6 +299,37 @@ pub fn run_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
         Some(Commands::Spec) => {
             println!("{}", include_str!("../SPEC_OXYADDON.md"));
+            Ok(())
+        }
+
+        Some(Commands::Api {
+            port,
+            token,
+            no_discovery,
+        }) => {
+            println!("Starting OxyConvert Suite API & MCP server...");
+            let _server = crate::api::start_server(port, token, !no_discovery)
+                .map_err(|e| format!("Failed to start API server: {e}"))?;
+            println!("✓ Server listening at: {}", _server.endpoint);
+            println!(
+                "  Discovery file:    {}",
+                crate::api::discovery_file_path().display()
+            );
+            println!("  REST Endpoints:");
+            println!("    GET  /api/v1/status");
+            println!("    POST /api/v1/detect");
+            println!("    POST /api/v1/convert");
+            println!("    POST /api/v1/inspect");
+            println!("    POST /api/v1/install");
+            println!("    GET  /api/v1/list");
+            println!("    POST /api/v1/uninstall");
+            println!("  JSON-RPC 2.0 & MCP:");
+            println!("    POST /rpc  (oxc.* methods)");
+            println!("    POST /mcp  (initialize, tools/list, tools/call)");
+            println!("\nPress Ctrl+C to terminate server.");
+
+            let (_tx, rx) = std::sync::mpsc::channel::<()>();
+            let _ = rx.recv();
             Ok(())
         }
     }

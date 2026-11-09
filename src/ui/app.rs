@@ -58,6 +58,9 @@ pub struct OxyConvertApp {
 
     // Installed addons cache
     pub installed_addons: Vec<InstalledAddonInfo>,
+
+    // Suite API loopback server
+    pub api_server: Option<crate::api::ServerHandle>,
 }
 
 impl Default for OxyConvertApp {
@@ -88,6 +91,9 @@ impl Default for OxyConvertApp {
             show_spec_dialog: false,
             file_dialog: InAppFileDialog::default(),
             installed_addons: Vec::new(),
+            api_server: crate::api::start_server(8990, None, true)
+                .or_else(|_| crate::api::start_server(0, None, true))
+                .ok(),
         };
 
         app.refresh_installed();
@@ -583,6 +589,37 @@ impl eframe::App for OxyConvertApp {
                     }
                 });
 
+                ui.menu_button("Suite", |ui| {
+                    if let Some(srv) = &self.api_server {
+                        ui.label(RichText::new("OxyLabs Suite API Server").strong());
+                        ui.label(
+                            RichText::new(format!("Endpoint: {}", srv.endpoint))
+                                .monospace()
+                                .small(),
+                        );
+                        if ui.button("📋 Copy API URL").clicked() {
+                            ui.ctx().copy_text(srv.endpoint.clone());
+                            self.status_message =
+                                format!("Copied API URL {} to clipboard", srv.endpoint);
+                            ui.close();
+                        }
+                    } else {
+                        ui.label(RichText::new("API Server: Inactive").weak());
+                        if ui.button("Start Loopback API").clicked() {
+                            self.api_server = crate::api::start_server(8990, None, true).ok();
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    ui.label(
+                        RichText::new(
+                            "Connected Suite Apps: OxyBrush, OxyLauncher, OxyPixel, OxyChar",
+                        )
+                        .weak()
+                        .small(),
+                    );
+                });
+
                 ui.menu_button("Help", |ui| {
                     if ui.button(".oxyaddon Specification…").clicked() {
                         self.show_spec_dialog = true;
@@ -596,7 +633,7 @@ impl eframe::App for OxyConvertApp {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
-                        RichText::new("OxyConvert 0.1.0")
+                        RichText::new("OxyConvert 0.1.1")
                             .color(Color32::from_gray(130))
                             .small(),
                     );
@@ -615,6 +652,15 @@ impl eframe::App for OxyConvertApp {
                 ui.label(RichText::new(&self.status_message).color(status_color));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if let Some(srv) = &self.api_server {
+                        ui.label(
+                            RichText::new(format!("● Suite API: {}", srv.endpoint))
+                                .color(Color32::from_rgb(80, 220, 120))
+                                .small(),
+                        );
+                        ui.separator();
+                    }
+
                     if let Some(dir) = oxybrush_plugins_dir() {
                         let exists = dir.exists();
                         let dot = if exists { "●" } else { "○" };
