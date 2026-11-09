@@ -144,6 +144,38 @@ if __name__ == "__main__":
     }
 }
 
+/// Convert a Blender addon distributed as a .zip archive.
+pub fn convert_blender_zip(zip_path: &std::path::Path, options: &ConversionOptions) -> Result<ConversionResult, String> {
+    use std::io::Read;
+    let file = std::fs::File::open(zip_path).map_err(|e| format!("Could not open zip: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Invalid zip: {e}"))?;
+
+    let mut py_files = Vec::new();
+    let mut init_content = None;
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry.name().to_string();
+        if name.ends_with(".py") {
+            let mut text = String::new();
+            let _ = entry.read_to_string(&mut text);
+            if name.ends_with("__init__.py") || init_content.is_none() {
+                init_content = Some(text.clone());
+            }
+            py_files.push((name, text));
+        }
+    }
+
+    let source = init_content.or_else(|| py_files.first().map(|(_, t)| t.clone())).ok_or_else(|| {
+        "No Python (.py) files found in Blender addon .zip".to_string()
+    })?;
+
+    Ok(BlenderConverter.convert(&source, options))
+}
+
 #[derive(Default)]
 struct BlenderInfo {
     name: Option<String>,

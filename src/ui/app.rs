@@ -1,5 +1,6 @@
 //! Main desktop GUI application for OxyConvert.
 
+use crate::converters::blender::convert_blender_zip;
 use crate::converters::{
     convert_script, detect_ecosystem, ConversionOptions, ConversionResult,
 };
@@ -9,9 +10,11 @@ use crate::package::installer::{
     InstalledAddonInfo,
 };
 use crate::package::manifest::{AddonCategory, AddonManifest, SourceEcosystem};
+use crate::ui::file_dialog::InAppFileDialog;
 use crate::ui::theme::{apply_oxy_theme, AccentPreset, ThemePreset};
 use crate::ui::widgets::{self, primary_button, section_header};
 use egui::{Color32, Margin, RichText, Ui, vec2};
+use std::fs;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +32,7 @@ pub struct OxyConvertApp {
 
     // Source script state
     pub source_path: Option<PathBuf>,
+    pub source_path_input: String,
     pub source_code: String,
     pub selected_ecosystem: SourceEcosystem,
     pub auto_detect: bool,
@@ -47,6 +51,7 @@ pub struct OxyConvertApp {
     pub is_error_status: bool,
     pub show_about_dialog: bool,
     pub show_spec_dialog: bool,
+    pub file_dialog: InAppFileDialog,
 
     // Installed addons cache
     pub installed_addons: Vec<InstalledAddonInfo>,
@@ -63,6 +68,7 @@ impl Default for OxyConvertApp {
             theme: ThemePreset::Graphite,
             accent: AccentPreset::ClayOrange,
             source_path: None,
+            source_path_input: String::new(),
             source_code: default_source,
             selected_ecosystem: detected,
             auto_detect: true,
@@ -75,6 +81,7 @@ impl Default for OxyConvertApp {
             is_error_status: false,
             show_about_dialog: false,
             show_spec_dialog: false,
+            file_dialog: InAppFileDialog::default(),
             installed_addons: Vec::new(),
         };
 
@@ -96,7 +103,11 @@ impl OxyConvertApp {
 
     pub fn trigger_conversion(&mut self) {
         let ecosystem = if self.auto_detect {
-            let filename = self.source_path.as_ref().and_then(|p| p.file_name()).and_then(|n| n.to_str());
+            let filename = self
+                .source_path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str());
             let detected = detect_ecosystem(&self.source_code, filename);
             self.selected_ecosystem = detected;
             detected
@@ -126,13 +137,88 @@ impl OxyConvertApp {
         self.conversion = Some(res);
     }
 
+    /// Load any supported file: .oxyaddon, .zip, or text script (.txt, .zsc, .py, .js, .json).
     pub fn load_file(&mut self, path: PathBuf) {
-        match std::fs::read_to_string(&path) {
-            Ok(content) => {
+        self.source_path_input = path.to_string_lossy().into_owned();
+
+        if !path.exists() {
+            self.status_message = format!("File does not exist: {}", path.display());
+            self.is_error_status = true;
+            return;
+        }
+
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        // 1. Direct .oxyaddon archive import
+        if ext == "oxyaddon" || (path.is_dir() && path.join("manifest.json").is_file()) {
+            match AddonPackage::open(&path) {
+                Ok(pkg) => {
+                    self.source_path = Some(path.clone());
+                    self.source_code = pkg.main_script.clone();
+                    self.manifest_draft = pkg.manifest.clone();
+                    self.raw_manifest_text =
+                        serde_json::to_string_pretty(&pkg.manifest).unwrap_or_default();
+                    self.selected_ecosystem = pkg.manifest.source_ecosystem;
+                    self.conversion = Some(ConversionResult {
+                        manifest: pkg.manifest.clone(),
+                        python_code: pkg.main_script,
+                        warnings: Vec::new(),
+                        mapped_calls: vec!["Opened native .oxyaddon package".into()],
+                        source_ecosystem: pkg.manifest.source_ecosystem,
+                    });
+                    self.status_message = format!(
+                        "Successfully imported .oxyaddon package: '{}' ({})",
+                        pkg.manifest.name,
+                        pkg.manifest.id
+                    );
+                    self.is_error_status = false;
+                }
+                Err(e) => {
+                    self.status_message = format!("Failed to open .oxyaddon package: {e}");
+                    self.is_error_status = true;
+                }
+            }
+            return;
+        }
+
+        // 2. Blender addon .zip package
+        if ext == "zip" {
+            let options = ConversionOptions::default();
+            match convert_blender_zip(&path, &options) {
+                Ok(res) => {
+                    self.source_path = Some(path.clone());
+                    self.source_code = res.python_code.clone();
+                    self.manifest_draft = res.manifest.clone();
+                    self.raw_manifest_text =
+                        serde_json::to_string_pretty(&res.manifest).unwrap_or_default();
+                    self.selected_ecosystem = SourceEcosystem::Blender;
+                    self.status_message = format!(
+                        "Successfully converted Blender zip addon: '{}'",
+                        res.manifest.name
+                    );
+                    self.is_error_status = false;
+                    self.conversion = Some(res);
+                }
+                Err(e) => {
+                    self.status_message = format!("Failed to convert Blender zip: {e}");
+                    self.is_error_status = true;
+                }
+            }
+            return;
+        }
+
+        // 3. Regular script (.txt, .zsc, .py, .js, .json)
+        match fs::read(&path) {
+            Ok(bytes) => {
+                let content = String::from_utf8_lossy(&bytes).into_owned();
                 self.source_path = Some(path.clone());
                 self.source_code = content;
                 self.trigger_conversion();
-                self.status_message = format!("Loaded {}", path.display());
+                self.status_message = format!("Successfully imported {}", path.display());
                 self.is_error_status = false;
             }
             Err(e) => {
@@ -220,14 +306,35 @@ impl eframe::App for OxyConvertApp {
         let ctx = ui.ctx().clone();
         apply_oxy_theme(&ctx, self.theme, self.accent);
 
+        // Handle Drag & Drop files directly onto the window
+        ctx.input(|i| {
+            for dropped in &i.raw.dropped_files {
+                let path = dropped.path();
+                if !path.as_os_str().is_empty() && path.exists() {
+                    self.load_file(path.to_path_buf());
+                } else if let Ok(bytes) = dropped.bytes() {
+                    let text = String::from_utf8_lossy(&bytes).into_owned();
+                    self.source_code = text;
+                    self.source_path = None;
+                    self.trigger_conversion();
+                }
+            }
+        });
+
         // Top menu bar
         egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    if ui.button("Open Source Script... (Ctrl+O)").clicked()
+                    if ui.button("📂 Open / Import Script or Addon... (Ctrl+O)").clicked() {
+                        self.file_dialog = InAppFileDialog::open_file();
+                    }
+
+                    if ui.button("🖥 Browse via System Dialog...").clicked()
                         && let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Scripts", &["txt", "zsc", "py", "js", "json"])
-                            .add_filter("All Files", &["*"])
+                            .add_filter(
+                                "All Plugins & Scripts",
+                                &["txt", "zsc", "py", "js", "json", "oxyaddon", "zip"],
+                            )
                             .pick_file()
                         {
                             self.load_file(path);
@@ -235,35 +342,39 @@ impl eframe::App for OxyConvertApp {
 
                     ui.separator();
                     ui.label(RichText::new("Load Examples:").weak());
-                    if ui.button("ZBrush: Dynamesh & Decimate").clicked() {
+                    if ui.button("🗿 ZBrush: Dynamesh & Decimate").clicked() {
                         self.source_code = sample_zbrush_script();
                         self.source_path = None;
+                        self.source_path_input = "example:zbrush".into();
                         self.trigger_conversion();
                     }
-                    if ui.button("Blender: Sculpt Remesh Tool").clicked() {
+                    if ui.button("⚡ Blender: Sculpt Remesh Tool").clicked() {
                         self.source_code = sample_blender_script();
                         self.source_path = None;
+                        self.source_path_input = "example:blender".into();
                         self.trigger_conversion();
                     }
-                    if ui.button("Nomad: Organic Remesh Pass").clicked() {
+                    if ui.button("📱 Nomad: Organic Remesh Pass").clicked() {
                         self.source_code = sample_nomad_script();
                         self.source_path = None;
+                        self.source_path_input = "example:nomad_js".into();
+                        self.trigger_conversion();
+                    }
+                    if ui.button("📱 Nomad: Heavy Clay Preset (JSON)").clicked() {
+                        self.source_code = sample_nomad_json();
+                        self.source_path = None;
+                        self.source_path_input = "example:nomad_json".into();
                         self.trigger_conversion();
                     }
 
                     ui.separator();
-                    if ui.button("Save .oxyaddon Package As... (Ctrl+S)").clicked() {
+                    if ui.button("💾 Save .oxyaddon Package As... (Ctrl+S)").clicked() {
                         let stem = self.manifest_draft.safe_stem();
-                        if let Some(dest) = rfd::FileDialog::new()
-                            .set_file_name(format!("{stem}.oxyaddon"))
-                            .add_filter("OxyAddon Package", &["oxyaddon"])
-                            .save_file()
-                        {
-                            self.save_oxyaddon(dest);
-                        }
+                        self.file_dialog =
+                            InAppFileDialog::save_file(&format!("{stem}.oxyaddon"));
                     }
 
-                    if ui.button("Install Directly to OxyBrush (Ctrl+I)").clicked() {
+                    if ui.button("🚀 Direct Install to OxyBrush (Ctrl+I)").clicked() {
                         self.install_to_oxybrush();
                     }
 
@@ -274,7 +385,7 @@ impl eframe::App for OxyConvertApp {
                 });
 
                 ui.menu_button("Convert", |ui| {
-                    if ui.button("Convert Now (F5)").clicked() {
+                    if ui.button("⚡ Convert Now (F5)").clicked() {
                         self.trigger_conversion();
                     }
                     ui.checkbox(&mut self.auto_detect, "Auto-detect source ecosystem");
@@ -351,13 +462,10 @@ impl eframe::App for OxyConvertApp {
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("📂 Open Script...").clicked()
-                        && let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Scripts", &["txt", "zsc", "py", "js", "json"])
-                            .pick_file()
-                        {
-                            self.load_file(path);
-                        }
+                    // Open File Button opens our robust in-app file browser
+                    if ui.button("📂 Open / Import...").clicked() {
+                        self.file_dialog = InAppFileDialog::open_file();
+                    }
 
                     if primary_button(ui, "⚡ Convert to .oxyaddon", self.accent.color()).clicked() {
                         self.trigger_conversion();
@@ -365,13 +473,8 @@ impl eframe::App for OxyConvertApp {
 
                     if ui.button("💾 Save Package...").clicked() {
                         let stem = self.manifest_draft.safe_stem();
-                        if let Some(dest) = rfd::FileDialog::new()
-                            .set_file_name(format!("{stem}.oxyaddon"))
-                            .add_filter("OxyAddon Package", &["oxyaddon"])
-                            .save_file()
-                        {
-                            self.save_oxyaddon(dest);
-                        }
+                        self.file_dialog =
+                            InAppFileDialog::save_file(&format!("{stem}.oxyaddon"));
                     }
 
                     if ui.button("🚀 Direct Install to OxyBrush").clicked() {
@@ -387,7 +490,14 @@ impl eframe::App for OxyConvertApp {
                             .selected_text(self.selected_ecosystem.display_name())
                             .show_ui(ui, |ui| {
                                 for eco in SourceEcosystem::ALL {
-                                    if ui.selectable_value(&mut self.selected_ecosystem, eco, eco.display_name()).clicked() {
+                                    if ui
+                                        .selectable_value(
+                                            &mut self.selected_ecosystem,
+                                            eco,
+                                            eco.display_name(),
+                                        )
+                                        .clicked()
+                                    {
                                         self.trigger_conversion();
                                     }
                                 }
@@ -395,10 +505,52 @@ impl eframe::App for OxyConvertApp {
                     } else {
                         widgets::badge_chip(
                             ui,
-                            &format!("{} {}", self.selected_ecosystem.icon(), self.selected_ecosystem.display_name()),
+                            &format!(
+                                "{} {}",
+                                self.selected_ecosystem.icon(),
+                                self.selected_ecosystem.display_name()
+                            ),
                             Color32::from_gray(40),
                             self.accent.color(),
                         );
+                    }
+                });
+
+                // Path input & quick loader bar
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("File Path:").weak());
+                    let path_edit = ui.add(
+                        egui::TextEdit::singleline(&mut self.source_path_input)
+                            .desired_width(ui.available_width() - 250.0)
+                            .hint_text("Enter file path or drag & drop script/addon here..."),
+                    );
+                    if (path_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                        || ui.button("📥 Load").clicked()
+                    {
+                        let p = PathBuf::from(self.source_path_input.trim());
+                        self.load_file(p);
+                    }
+
+                    ui.separator();
+                    ui.label(RichText::new("Examples:").weak());
+                    if ui.button("ZBrush").clicked() {
+                        self.source_code = sample_zbrush_script();
+                        self.source_path = None;
+                        self.source_path_input = "example:zbrush".into();
+                        self.trigger_conversion();
+                    }
+                    if ui.button("Blender").clicked() {
+                        self.source_code = sample_blender_script();
+                        self.source_path = None;
+                        self.source_path_input = "example:blender".into();
+                        self.trigger_conversion();
+                    }
+                    if ui.button("Nomad").clicked() {
+                        self.source_code = sample_nomad_script();
+                        self.source_path = None;
+                        self.source_path_input = "example:nomad".into();
+                        self.trigger_conversion();
                     }
                 });
             });
@@ -416,12 +568,19 @@ impl eframe::App for OxyConvertApp {
 
                     ui.horizontal(|ui| {
                         if let Some(p) = &self.source_path {
-                            ui.label(RichText::new(p.file_name().unwrap().to_string_lossy()).strong());
+                            ui.label(
+                                RichText::new(p.file_name().unwrap().to_string_lossy()).strong(),
+                            );
                         } else {
                             ui.label(RichText::new("(Unsaved buffer / Example)").weak());
                         }
+
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(format!("{} lines", self.source_code.lines().count()));
+                            if ui.button("📋 Clear").clicked() {
+                                self.source_code.clear();
+                                self.source_path = None;
+                            }
                         });
                     });
 
@@ -449,8 +608,16 @@ impl eframe::App for OxyConvertApp {
 
                     ui.horizontal(|ui| {
                         ui.selectable_value(&mut self.right_tab, RightTab::PythonCode, "🐍 main.py");
-                        ui.selectable_value(&mut self.right_tab, RightTab::Manifest, "📋 manifest.json");
-                        ui.selectable_value(&mut self.right_tab, RightTab::Report, "📊 Translation Report");
+                        ui.selectable_value(
+                            &mut self.right_tab,
+                            RightTab::Manifest,
+                            "📋 manifest.json",
+                        );
+                        ui.selectable_value(
+                            &mut self.right_tab,
+                            RightTab::Report,
+                            "📊 Translation Report",
+                        );
                         ui.selectable_value(
                             &mut self.right_tab,
                             RightTab::InstalledManager,
@@ -470,7 +637,16 @@ impl eframe::App for OxyConvertApp {
             });
         });
 
-        // Dialogs
+        // In-App File Browser Dialog Modal
+        if let Some(picked) = self.file_dialog.show(&ctx) {
+            if self.file_dialog.is_save_mode {
+                self.save_oxyaddon(picked);
+            } else {
+                self.load_file(picked);
+            }
+        }
+
+        // About Dialog
         let mut show_about = self.show_about_dialog;
         if show_about {
             let mut close_about = false;
@@ -493,6 +669,7 @@ impl eframe::App for OxyConvertApp {
             self.show_about_dialog = show_about && !close_about;
         }
 
+        // Specification Dialog
         let mut show_spec = self.show_spec_dialog;
         if show_spec {
             egui::Window::new(".oxyaddon Specification")
@@ -597,7 +774,11 @@ impl OxyConvertApp {
                                 .selected_text(self.manifest_draft.category.display_name())
                                 .show_ui(ui, |ui| {
                                     for c in AddonCategory::ALL {
-                                        ui.selectable_value(&mut self.manifest_draft.category, c, c.display_name());
+                                        ui.selectable_value(
+                                            &mut self.manifest_draft.category,
+                                            c,
+                                            c.display_name(),
+                                        );
                                     }
                                 });
                             ui.end_row();
@@ -622,18 +803,32 @@ impl OxyConvertApp {
         if let Some(res) = &self.conversion {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.heading("Conversion Diagnostics");
-                ui.label(format!("Source Ecosystem: {}", res.source_ecosystem.display_name()));
+                ui.label(format!(
+                    "Source Ecosystem: {}",
+                    res.source_ecosystem.display_name()
+                ));
                 ui.add_space(6.0);
 
                 if !res.warnings.is_empty() {
-                    ui.label(RichText::new(format!("⚠ Warnings ({})", res.warnings.len())).strong().color(Color32::from_rgb(255, 180, 80)));
+                    ui.label(
+                        RichText::new(format!("⚠ Warnings ({})", res.warnings.len()))
+                            .strong()
+                            .color(Color32::from_rgb(255, 180, 80)),
+                    );
                     for w in &res.warnings {
                         ui.label(format!("• {w}"));
                     }
                     ui.add_space(8.0);
                 }
 
-                ui.label(RichText::new(format!("✔ Mapped API Operations ({})", res.mapped_calls.len())).strong().color(Color32::from_rgb(100, 220, 140)));
+                ui.label(
+                    RichText::new(format!(
+                        "✔ Mapped API Operations ({})",
+                        res.mapped_calls.len()
+                    ))
+                    .strong()
+                    .color(Color32::from_rgb(100, 220, 140)),
+                );
                 for m in &res.mapped_calls {
                     ui.label(format!("• {m}"));
                 }
@@ -649,15 +844,16 @@ impl OxyConvertApp {
                     self.refresh_installed();
                 }
                 if let Some(dir) = oxybrush_plugins_dir()
-                    && ui.button("📁 Open Plugins Folder").clicked() {
-                        let _ = std::fs::create_dir_all(&dir);
-                        #[cfg(target_os = "windows")]
-                        let _ = std::process::Command::new("explorer").arg(&dir).spawn();
-                        #[cfg(target_os = "macos")]
-                        let _ = std::process::Command::new("open").arg(&dir).spawn();
-                        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-                        let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
-                    }
+                    && ui.button("📁 Open Plugins Folder").clicked()
+                {
+                    let _ = std::fs::create_dir_all(&dir);
+                    #[cfg(target_os = "windows")]
+                    let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+                    #[cfg(target_os = "macos")]
+                    let _ = std::process::Command::new("open").arg(&dir).spawn();
+                    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+                    let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+                }
             });
         });
 
@@ -682,14 +878,22 @@ impl OxyConvertApp {
                                 } else {
                                     ".py script"
                                 };
-                                widgets::badge_chip(ui, badge, Color32::from_gray(30), self.accent.color());
+                                widgets::badge_chip(
+                                    ui,
+                                    badge,
+                                    Color32::from_gray(30),
+                                    self.accent.color(),
+                                );
                                 ui.label(RichText::new(&addon.name).strong());
 
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.button("🗑 Uninstall").clicked() {
-                                        remove_path = Some(addon.path.clone());
-                                    }
-                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui.button("🗑 Uninstall").clicked() {
+                                            remove_path = Some(addon.path.clone());
+                                        }
+                                    },
+                                );
                             });
                         });
                     ui.add_space(3.0);
@@ -697,10 +901,11 @@ impl OxyConvertApp {
             });
 
             if let Some(path) = remove_path
-                && let Ok(()) = uninstall_addon(&path) {
-                    self.status_message = format!("Removed {}", path.display());
-                    self.refresh_installed();
-                }
+                && let Ok(()) = uninstall_addon(&path)
+            {
+                self.status_message = format!("Removed {}", path.display());
+                self.refresh_installed();
+            }
         }
     }
 }
@@ -719,7 +924,8 @@ fn sample_zbrush_script() -> String {
     [IPress, "Tool:Geometry:Decimation Master:Decimate Current"]
     [Note, "Auto clean pass finished!"]
 ]
-"#.to_string()
+"#
+    .to_string()
 }
 
 fn sample_blender_script() -> String {
@@ -742,7 +948,8 @@ class SCULPT_OT_quick_remesh(bpy.types.Operator):
         bpy.ops.object.voxel_remesh()
         bpy.ops.object.subdivision_set(level=1)
         return {'FINISHED'}
-"#.to_string()
+"#
+    .to_string()
 }
 
 fn sample_nomad_script() -> String {
@@ -754,5 +961,20 @@ nomad.symmetry = true;
 nomad.topology.remesh(0.03);
 nomad.decimate(30);
 console.log("Nomad organic pass executed");
-"#.to_string()
+"#
+    .to_string()
+}
+
+fn sample_nomad_json() -> String {
+    r#"{
+    "name": "Heavy Clay Tool",
+    "author": "NomadPro",
+    "description": "Custom clay brush preset with 40px radius and 0.85 strength",
+    "tool": "clay",
+    "radius": 40.0,
+    "intensity": 0.85,
+    "remesh": 0.02
+}
+"#
+    .to_string()
 }
