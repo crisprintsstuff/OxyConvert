@@ -1,0 +1,13 @@
+// Name: Quick Dynamesh Decimate
+// Author: DigitalSculptor
+// Description: Automatically dynameshes and decimates active tool in ZBrush
+[IButton, "Zplugin:OxyTools:AutoClean", "Remesh and decimate active subtool",
+    [ISet, "Draw:Draw Size", 64]
+    [ISet, "Draw:Z Intensity", 80]
+    [IPress, "Brush:Clay"]
+    [IPress, "Transform:Activate Symmetry"]
+    [IPress, "Tool:Geometry:Divide"]
+    [IPress, "Tool:Geometry:Dynamesh"]
+    [IPress, "Tool:Geometry:Decimation Master:Decimate Current"]
+    [Note, "Auto clean pass finished!"]
+]

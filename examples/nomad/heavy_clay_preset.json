@@ -1,0 +1,9 @@
+{
+    "name": "Heavy Clay Tool",
+    "author": "NomadPro",
+    "description": "Custom clay brush preset with 40px radius and 0.85 strength",
+    "tool": "clay",
+    "radius": 40.0,
+    "intensity": 0.85,
+    "remesh": 0.02
+}
