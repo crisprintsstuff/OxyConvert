@@ -168,15 +168,26 @@ impl Default for AddonManifest {
 impl AddonManifest {
     /// Format id into a safe filename/directory stem.
     pub fn safe_stem(&self) -> String {
-        let raw = if self.id.is_empty() {
-            &self.name
+        // If id is empty or default generic id, use the addon's unique name
+        let raw = if self.id.is_empty() || self.id == "com.example.addon" || self.id == "com_example_addon" {
+            if !self.name.is_empty() && self.name != "Untitled Addon" {
+                &self.name
+            } else {
+                &self.id
+            }
         } else {
             &self.id
         };
-        raw.chars()
+        let stem: String = raw.chars()
             .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
             .collect::<String>()
-            .to_lowercase()
+            .trim_matches('_')
+            .to_lowercase();
+        if stem.is_empty() {
+            "addon".to_string()
+        } else {
+            stem
+        }
     }
 
     /// Generate native OxyBrush `plugin.json` content matching `oxy_plugin::addon::inspect`.

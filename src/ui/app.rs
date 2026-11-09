@@ -313,6 +313,14 @@ impl OxyConvertApp {
                 let content = String::from_utf8_lossy(&bytes).into_owned();
                 self.source_path = Some(path.clone());
                 self.source_code = content;
+
+                // Reset manifest draft name/author so trigger_conversion derives unique info from new file
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    let formatted = format_clean_name(stem);
+                    self.manifest_draft.name = formatted;
+                    self.manifest_draft.id.clear();
+                }
+
                 self.trigger_conversion();
                 self.status_message = format!("Successfully imported {}", path.display());
                 self.is_error_status = false;
@@ -419,15 +427,16 @@ impl eframe::App for OxyConvertApp {
             }
         });
 
-        // Top menu bar
+        // Top menu bar (OxyBrush style: File, Convert, View/Appearance, Help)
         egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    if ui.button("📂 Open / Import Script or Addon... (Ctrl+O)").clicked() {
+                    if ui.button("Open / Import…\tCtrl+O").clicked() {
                         self.file_dialog = InAppFileDialog::open_file();
+                        ui.close();
                     }
 
-                    if ui.button("🖥 Browse via System Dialog...").clicked()
+                    if ui.button("System File Browser…").clicked()
                         && let Some(path) = rfd::FileDialog::new()
                             .add_filter(
                                 "All Plugins & Scripts",
@@ -436,61 +445,86 @@ impl eframe::App for OxyConvertApp {
                             .pick_file()
                         {
                             self.load_file(path);
+                            ui.close();
                         }
 
-                    ui.separator();
-                    ui.label(RichText::new("Load Examples:").weak());
-                    if ui.button("🗿 ZBrush: Dynamesh & Decimate").clicked() {
-                        self.source_code = sample_zbrush_script();
-                        self.source_path = None;
-                        self.source_path_input = "example:zbrush".into();
-                        self.trigger_conversion();
-                    }
-                    if ui.button("⚡ Blender: Sculpt Remesh Tool").clicked() {
-                        self.source_code = sample_blender_script();
-                        self.source_path = None;
-                        self.source_path_input = "example:blender".into();
-                        self.trigger_conversion();
-                    }
-                    if ui.button("📱 Nomad: Organic Remesh Pass").clicked() {
-                        self.source_code = sample_nomad_script();
-                        self.source_path = None;
-                        self.source_path_input = "example:nomad_js".into();
-                        self.trigger_conversion();
-                    }
-                    if ui.button("📱 Nomad: Heavy Clay Preset (JSON)").clicked() {
-                        self.source_code = sample_nomad_json();
-                        self.source_path = None;
-                        self.source_path_input = "example:nomad_json".into();
-                        self.trigger_conversion();
-                    }
+                    ui.menu_button("Load Example", |ui| {
+                        if ui.button("ZBrush: Dynamesh & Decimate").clicked() {
+                            self.source_code = sample_zbrush_script();
+                            self.source_path = None;
+                            self.source_path_input = "example:zbrush".into();
+                            self.manifest_draft.name = "Dynamesh Decimate".into();
+                            self.manifest_draft.id.clear();
+                            self.trigger_conversion();
+                            ui.close();
+                        }
+                        if ui.button("Blender: Sculpt Remesh Tool").clicked() {
+                            self.source_code = sample_blender_script();
+                            self.source_path = None;
+                            self.source_path_input = "example:blender".into();
+                            self.manifest_draft.name = "Quick Sculpt Remesh".into();
+                            self.manifest_draft.id.clear();
+                            self.trigger_conversion();
+                            ui.close();
+                        }
+                        if ui.button("Nomad: Organic Remesh Pass").clicked() {
+                            self.source_code = sample_nomad_script();
+                            self.source_path = None;
+                            self.source_path_input = "example:nomad_js".into();
+                            self.manifest_draft.name = "Nomad Organic Sculpt Pass".into();
+                            self.manifest_draft.id.clear();
+                            self.trigger_conversion();
+                            ui.close();
+                        }
+                        if ui.button("Nomad: Heavy Clay Preset").clicked() {
+                            self.source_code = sample_nomad_json();
+                            self.source_path = None;
+                            self.source_path_input = "example:nomad_json".into();
+                            self.manifest_draft.name = "Heavy Clay Tool".into();
+                            self.manifest_draft.id.clear();
+                            self.trigger_conversion();
+                            ui.close();
+                        }
+                    });
 
                     ui.separator();
-                    if ui.button("💾 Save .oxyaddon Package As... (Ctrl+S)").clicked() {
+                    if ui.button("Save .oxyaddon Package As…\tCtrl+S").clicked() {
                         let stem = self.manifest_draft.safe_stem();
                         self.file_dialog =
                             InAppFileDialog::save_file(&format!("{stem}.oxyaddon"));
+                        ui.close();
                     }
 
-                    if ui.button("🚀 Direct Install to OxyBrush (Ctrl+I)").clicked() {
+                    if ui.button("Install to OxyBrush\tCtrl+I").clicked() {
                         self.install_to_oxybrush();
+                        ui.close();
                     }
 
                     ui.separator();
-                    if ui.button("Exit").clicked() {
+                    if ui.button("Quit\tCtrl+Q").clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
 
                 ui.menu_button("Convert", |ui| {
-                    if ui.button("⚡ Convert Now (F5)").clicked() {
+                    if ui.button("Convert Now\tF5").clicked() {
                         self.trigger_conversion();
+                        ui.close();
                     }
-                    ui.checkbox(&mut self.auto_detect, "Auto-detect source ecosystem");
+                    ui.checkbox(&mut self.auto_detect, "Auto-detect ecosystem");
+                    ui.separator();
+                    ui.label(RichText::new("Force Ecosystem").weak());
+                    for eco in SourceEcosystem::ALL {
+                        if ui.selectable_value(&mut self.selected_ecosystem, eco, eco.display_name()).clicked() {
+                            self.auto_detect = false;
+                            self.trigger_conversion();
+                            ui.close();
+                        }
+                    }
                 });
 
-                ui.menu_button("Theme", |ui| {
-                    ui.label(RichText::new("Visual Preset").strong());
+                ui.menu_button("Appearance", |ui| {
+                    ui.label(RichText::new("Theme Preset").strong());
                     for t in ThemePreset::ALL {
                         ui.selectable_value(&mut self.theme, t, t.display_name());
                     }
@@ -501,19 +535,35 @@ impl eframe::App for OxyConvertApp {
                     }
                 });
 
-                ui.menu_button("Help", |ui| {
-                    if ui.button(".oxyaddon Specification").clicked() {
-                        self.show_spec_dialog = true;
+                ui.menu_button("Plugins", |ui| {
+                    if ui.button("Refresh Installed List").clicked() {
+                        self.refresh_installed();
+                        self.right_tab = RightTab::InstalledManager;
+                        ui.close();
                     }
-                    if ui.button("About OxyConvert").clicked() {
+                    if let Some(dir) = oxybrush_plugins_dir() {
+                        if ui.button("Open OxyBrush Plugins Folder…").clicked() {
+                            let _ = rfd::FileDialog::new().set_directory(&dir).pick_folder();
+                            ui.close();
+                        }
+                    }
+                });
+
+                ui.menu_button("Help", |ui| {
+                    if ui.button(".oxyaddon Specification…").clicked() {
+                        self.show_spec_dialog = true;
+                        ui.close();
+                    }
+                    if ui.button("About OxyConvert…").clicked() {
                         self.show_about_dialog = true;
+                        ui.close();
                     }
                 });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
-                        RichText::new("OxyConvert v0.1.0")
-                            .color(Color32::from_gray(140))
+                        RichText::new("OxyConvert 0.1.0")
+                            .color(Color32::from_gray(130))
                             .small(),
                     );
                 });
@@ -551,7 +601,7 @@ impl eframe::App for OxyConvertApp {
             });
         });
 
-        // Top toolbar
+        // Top toolbar (matching OxyBrush toolbar layout and spacing)
         egui::Panel::top("toolbar")
             .frame(
                 egui::Frame::new()
@@ -560,27 +610,35 @@ impl eframe::App for OxyConvertApp {
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    // Open File Button opens our robust in-app file browser
-                    if ui.button("📂 Open / Import...").clicked() {
+                    if ui.button("Open / Import…").on_hover_text("Open or import a script, .zsc, or .zip archive").clicked() {
                         self.file_dialog = InAppFileDialog::open_file();
                     }
 
-                    if primary_button(ui, "⚡ Convert to .oxyaddon", self.accent.color()).clicked() {
+                    if primary_button(ui, "Convert to .oxyaddon", self.accent.color())
+                        .on_hover_text("Transpile active script to OxyBrush Python SDK addon")
+                        .clicked()
+                    {
                         self.trigger_conversion();
                     }
 
-                    if ui.button("💾 Save Package...").clicked() {
+                    if ui.button("Save Package…")
+                        .on_hover_text("Save converted addon to .oxyaddon archive file")
+                        .clicked()
+                    {
                         let stem = self.manifest_draft.safe_stem();
                         self.file_dialog =
                             InAppFileDialog::save_file(&format!("{stem}.oxyaddon"));
                     }
 
-                    if ui.button("🚀 Direct Install to OxyBrush").clicked() {
+                    if ui.button("Install to OxyBrush")
+                        .on_hover_text("Deploy addon directly to your local OxyBrush plugins folder")
+                        .clicked()
+                    {
                         self.install_to_oxybrush();
                     }
 
                     ui.separator();
-                    ui.label("Ecosystem:");
+                    ui.label(RichText::new("Ecosystem:").weak());
                     ui.checkbox(&mut self.auto_detect, "Auto");
 
                     if !self.auto_detect {
@@ -617,37 +675,43 @@ impl eframe::App for OxyConvertApp {
                 // Path input & quick loader bar
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("File Path:").weak());
+                    ui.label(RichText::new("File:").weak());
                     let path_edit = ui.add(
                         egui::TextEdit::singleline(&mut self.source_path_input)
                             .desired_width(ui.available_width() - 250.0)
-                            .hint_text("Enter file path or drag & drop script/addon here..."),
+                            .hint_text("Drop script/addon file here or enter file path…"),
                     );
                     if (path_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                        || ui.button("📥 Load").clicked()
+                        || ui.button("Load").clicked()
                     {
                         let p = PathBuf::from(self.source_path_input.trim());
                         self.load_file(p);
                     }
 
                     ui.separator();
-                    ui.label(RichText::new("Examples:").weak());
+                    ui.label(RichText::new("Presets:").weak());
                     if ui.button("ZBrush").clicked() {
                         self.source_code = sample_zbrush_script();
                         self.source_path = None;
                         self.source_path_input = "example:zbrush".into();
+                        self.manifest_draft.name = "Dynamesh Decimate".into();
+                        self.manifest_draft.id.clear();
                         self.trigger_conversion();
                     }
                     if ui.button("Blender").clicked() {
                         self.source_code = sample_blender_script();
                         self.source_path = None;
                         self.source_path_input = "example:blender".into();
+                        self.manifest_draft.name = "Quick Sculpt Remesh".into();
+                        self.manifest_draft.id.clear();
                         self.trigger_conversion();
                     }
                     if ui.button("Nomad").clicked() {
                         self.source_code = sample_nomad_script();
                         self.source_path = None;
-                        self.source_path_input = "example:nomad".into();
+                        self.source_path_input = "example:nomad_js".into();
+                        self.manifest_draft.name = "Nomad Organic Sculpt Pass".into();
+                        self.manifest_draft.id.clear();
                         self.trigger_conversion();
                     }
                 });
@@ -1071,8 +1135,27 @@ fn sample_nomad_json() -> String {
     "tool": "clay",
     "radius": 40.0,
     "intensity": 0.85,
-    "remesh": 0.02
+    "clay_build_up": true
 }
 "#
     .to_string()
+}
+
+fn format_clean_name(stem: &str) -> String {
+    let mut words = Vec::new();
+    for part in stem.split(['_', '-', '.']) {
+        if part.is_empty() {
+            continue;
+        }
+        let mut chars = part.chars();
+        if let Some(first) = chars.next() {
+            let cap = first.to_uppercase().collect::<String>() + chars.as_str();
+            words.push(cap);
+        }
+    }
+    if words.is_empty() {
+        "Custom Addon".into()
+    } else {
+        words.join(" ")
+    }
 }
