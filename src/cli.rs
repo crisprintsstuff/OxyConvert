@@ -130,33 +130,66 @@ pub fn run_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             name,
             author,
         }) => {
-            let content = fs::read_to_string(&input)?;
-            let file_name = input.file_name().and_then(|n| n.to_str());
-
-            let eco = match ecosystem {
-                Some(e) => e.into(),
-                None => detect_ecosystem(&content, file_name),
-            };
-
             let options = ConversionOptions {
                 addon_name: name,
                 addon_author: author,
                 ..Default::default()
             };
 
-            let result = convert_script(&content, eco, &options);
+            let ext = input
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+
+            let (result, extra_files) = if ext == "zip" {
+                let eco = match ecosystem {
+                    Some(e) => e.into(),
+                    None => crate::converters::detect_zip_ecosystem(&input),
+                };
+                match eco {
+                    SourceEcosystem::Zbrush => {
+                        let (res, extra) = crate::converters::zbrush::convert_zbrush_zip(&input, &options)?;
+                        (res, extra)
+                    }
+                    _ => {
+                        let res = crate::converters::blender::convert_blender_zip(&input, &options)?;
+                        (res, std::collections::BTreeMap::new())
+                    }
+                }
+            } else if ext == "zsc" {
+                let bytes = fs::read(&input)?;
+                let file_name = input.file_name().and_then(|n| n.to_str()).unwrap_or("plugin.zsc");
+                let res = crate::converters::zbrush::convert_zbrush_zsc(&bytes, file_name, &options);
+                (res, std::collections::BTreeMap::new())
+            } else {
+                let bytes = fs::read(&input)?;
+                let content = String::from_utf8_lossy(&bytes).into_owned();
+                let file_name = input.file_name().and_then(|n| n.to_str());
+                let eco = match ecosystem {
+                    Some(e) => e.into(),
+                    None => detect_ecosystem(&content, file_name),
+                };
+                let res = convert_script(&content, eco, &options);
+                (res, std::collections::BTreeMap::new())
+            };
+
             println!("Conversion summary:");
             println!("  Ecosystem: {}", result.source_ecosystem.display_name());
             println!("  Name:      {}", result.manifest.name);
             println!("  ID:        {}", result.manifest.id);
             println!("  Category:  {}", result.manifest.category.display_name());
             println!("  Mapped:    {} API operations", result.mapped_calls.len());
+            if !extra_files.is_empty() {
+                println!("  Bundled:   {} companion asset(s)", extra_files.len());
+            }
 
             for w in &result.warnings {
                 eprintln!("  [Warning] {w}");
             }
 
-            let package = AddonPackage::new(result.manifest.clone(), result.python_code);
+            let mut package = AddonPackage::new(result.manifest.clone(), result.python_code);
+            package.extra_files = extra_files;
 
             // Determine output path if specified or install
             let out_path = output.unwrap_or_else(|| {

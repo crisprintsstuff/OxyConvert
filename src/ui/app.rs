@@ -1,6 +1,8 @@
 //! Main desktop GUI application for OxyConvert.
 
 use crate::converters::blender::convert_blender_zip;
+use crate::converters::detect_zip_ecosystem;
+use crate::converters::zbrush::{convert_zbrush_zip, convert_zbrush_zsc};
 use crate::converters::{
     convert_script, detect_ecosystem, ConversionOptions, ConversionResult,
 };
@@ -39,6 +41,7 @@ pub struct OxyConvertApp {
 
     // Converted result
     pub conversion: Option<ConversionResult>,
+    pub extra_files: std::collections::BTreeMap<String, Vec<u8>>,
 
     // Manifest edit state
     pub manifest_draft: AddonManifest,
@@ -73,6 +76,7 @@ impl Default for OxyConvertApp {
             selected_ecosystem: detected,
             auto_detect: true,
             conversion: Some(res.clone()),
+            extra_files: std::collections::BTreeMap::new(),
             manifest_draft: res.manifest,
             raw_manifest_mode: false,
             raw_manifest_text: manifest_text,
@@ -159,6 +163,7 @@ impl OxyConvertApp {
                 Ok(pkg) => {
                     self.source_path = Some(path.clone());
                     self.source_code = pkg.main_script.clone();
+                    self.extra_files = pkg.extra_files.clone();
                     self.manifest_draft = pkg.manifest.clone();
                     self.raw_manifest_text =
                         serde_json::to_string_pretty(&pkg.manifest).unwrap_or_default();
@@ -185,33 +190,124 @@ impl OxyConvertApp {
             return;
         }
 
-        // 2. Blender addon .zip package
+        // 2. Generic .zip package: check if ZBrush, Blender, Nomad, or Native
         if ext == "zip" {
             let options = ConversionOptions::default();
-            match convert_blender_zip(&path, &options) {
-                Ok(res) => {
+            let eco = detect_zip_ecosystem(&path);
+            match eco {
+                SourceEcosystem::Zbrush => {
+                    match convert_zbrush_zip(&path, &options) {
+                        Ok((res, extra)) => {
+                            self.source_path = Some(path.clone());
+                            self.source_code = res.python_code.clone();
+                            self.extra_files = extra;
+                            self.manifest_draft = res.manifest.clone();
+                            self.raw_manifest_text =
+                                serde_json::to_string_pretty(&res.manifest).unwrap_or_default();
+                            self.selected_ecosystem = SourceEcosystem::Zbrush;
+                            self.status_message = format!(
+                                "Successfully converted ZBrush zip plugin: '{}' (bundled {} companion assets)",
+                                res.manifest.name,
+                                self.extra_files.len()
+                            );
+                            self.is_error_status = false;
+                            self.conversion = Some(res);
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Failed to convert ZBrush zip: {e}");
+                            self.is_error_status = true;
+                        }
+                    }
+                }
+                SourceEcosystem::Blender => {
+                    match convert_blender_zip(&path, &options) {
+                        Ok(res) => {
+                            self.source_path = Some(path.clone());
+                            self.source_code = res.python_code.clone();
+                            self.extra_files.clear();
+                            self.manifest_draft = res.manifest.clone();
+                            self.raw_manifest_text =
+                                serde_json::to_string_pretty(&res.manifest).unwrap_or_default();
+                            self.selected_ecosystem = SourceEcosystem::Blender;
+                            self.status_message = format!(
+                                "Successfully converted Blender zip addon: '{}'",
+                                res.manifest.name
+                            );
+                            self.is_error_status = false;
+                            self.conversion = Some(res);
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Failed to convert Blender zip: {e}");
+                            self.is_error_status = true;
+                        }
+                    }
+                }
+                _ => {
+                    // Try AddonPackage or ZBrush fallback
+                    if let Ok(pkg) = AddonPackage::open(&path) {
+                        self.source_path = Some(path.clone());
+                        self.source_code = pkg.main_script.clone();
+                        self.extra_files = pkg.extra_files.clone();
+                        self.manifest_draft = pkg.manifest.clone();
+                        self.raw_manifest_text =
+                            serde_json::to_string_pretty(&pkg.manifest).unwrap_or_default();
+                        self.selected_ecosystem = pkg.manifest.source_ecosystem;
+                        self.status_message = format!("Opened package: '{}'", pkg.manifest.name);
+                        self.is_error_status = false;
+                        self.conversion = Some(ConversionResult {
+                            manifest: pkg.manifest,
+                            python_code: pkg.main_script,
+                            warnings: Vec::new(),
+                            mapped_calls: vec!["Opened package".into()],
+                            source_ecosystem: SourceEcosystem::Native,
+                        });
+                    } else if let Ok((res, extra)) = convert_zbrush_zip(&path, &options) {
+                        self.source_path = Some(path.clone());
+                        self.source_code = res.python_code.clone();
+                        self.extra_files = extra;
+                        self.manifest_draft = res.manifest.clone();
+                        self.raw_manifest_text =
+                            serde_json::to_string_pretty(&res.manifest).unwrap_or_default();
+                        self.selected_ecosystem = SourceEcosystem::Zbrush;
+                        self.status_message = format!("Converted ZBrush archive: '{}'", res.manifest.name);
+                        self.is_error_status = false;
+                        self.conversion = Some(res);
+                    } else {
+                        self.status_message = "Could not parse zip archive. No supported plugin files found inside.".into();
+                        self.is_error_status = true;
+                    }
+                }
+            }
+            return;
+        }
+
+        // 3. Compiled ZBrush binary (.zsc)
+        if ext == "zsc" {
+            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("plugin.zsc");
+            match fs::read(&path) {
+                Ok(bytes) => {
+                    let options = ConversionOptions::default();
+                    let res = convert_zbrush_zsc(&bytes, filename, &options);
                     self.source_path = Some(path.clone());
                     self.source_code = res.python_code.clone();
+                    self.extra_files.clear();
                     self.manifest_draft = res.manifest.clone();
                     self.raw_manifest_text =
                         serde_json::to_string_pretty(&res.manifest).unwrap_or_default();
-                    self.selected_ecosystem = SourceEcosystem::Blender;
-                    self.status_message = format!(
-                        "Successfully converted Blender zip addon: '{}'",
-                        res.manifest.name
-                    );
+                    self.selected_ecosystem = SourceEcosystem::Zbrush;
+                    self.status_message = format!("Converted compiled ZBrush plugin (.zsc): '{}'", res.manifest.name);
                     self.is_error_status = false;
                     self.conversion = Some(res);
                 }
                 Err(e) => {
-                    self.status_message = format!("Failed to convert Blender zip: {e}");
+                    self.status_message = format!("Failed to read .zsc file: {e}");
                     self.is_error_status = true;
                 }
             }
             return;
         }
 
-        // 3. Regular script (.txt, .zsc, .py, .js, .json)
+        // 4. Regular script (.txt, .py, .js, .json)
         match fs::read(&path) {
             Ok(bytes) => {
                 let content = String::from_utf8_lossy(&bytes).into_owned();
@@ -248,7 +344,8 @@ impl OxyConvertApp {
             self.manifest_draft.clone()
         };
 
-        let package = AddonPackage::new(manifest, &res.python_code);
+        let mut package = AddonPackage::new(manifest, &res.python_code);
+        package.extra_files = self.extra_files.clone();
         match package.save_to_archive(&target_path) {
             Ok(()) => {
                 self.status_message = format!("Saved package to {}", target_path.display());
@@ -281,7 +378,8 @@ impl OxyConvertApp {
             self.manifest_draft.clone()
         };
 
-        let package = AddonPackage::new(manifest, &res.python_code);
+        let mut package = AddonPackage::new(manifest, &res.python_code);
+        package.extra_files = self.extra_files.clone();
         match install_addon(&package, false, true) {
             Ok(p) => {
                 self.status_message = format!(

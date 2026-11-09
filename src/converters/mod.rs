@@ -35,14 +35,64 @@ pub trait ScriptConverter {
     fn convert(&self, source: &str, options: &ConversionOptions) -> ConversionResult;
 }
 
+/// Inspect the entries inside a .zip archive to detect whether it is ZBrush, Blender, Nomad, or Native.
+pub fn detect_zip_ecosystem(path: &std::path::Path) -> SourceEcosystem {
+    let Ok(file) = std::fs::File::open(path) else {
+        return SourceEcosystem::Native;
+    };
+    let Ok(mut archive) = zip::ZipArchive::new(file) else {
+        return SourceEcosystem::Native;
+    };
+
+    let mut has_zsc_or_zbrush = false;
+    let mut has_manifest = false;
+    let mut has_bpy = false;
+    let mut has_nomad = false;
+
+    for i in 0..archive.len() {
+        if let Ok(entry) = archive.by_index(i) {
+            let name = entry.name().to_lowercase();
+            if name == "manifest.json" {
+                has_manifest = true;
+            } else if name.ends_with(".zsc")
+                || name.contains("zbrush")
+                || name.contains("zstartup")
+                || name.contains("zplugs")
+                || name.ends_with(".zmt")
+            {
+                has_zsc_or_zbrush = true;
+            } else if name.ends_with(".py") || name.contains("bl_info") {
+                has_bpy = true;
+            } else if name.ends_with(".js") || name.contains("nomad") {
+                has_nomad = true;
+            }
+        }
+    }
+
+    if has_manifest {
+        SourceEcosystem::Native
+    } else if has_zsc_or_zbrush {
+        SourceEcosystem::Zbrush
+    } else if has_bpy {
+        SourceEcosystem::Blender
+    } else if has_nomad {
+        SourceEcosystem::Nomad
+    } else {
+        SourceEcosystem::Native
+    }
+}
+
 /// Heuristically auto-detect which software a script or plugin came from.
 pub fn detect_ecosystem(source: &str, filename: Option<&str>) -> SourceEcosystem {
     // 1. Check file extension if provided
     if let Some(name) = filename {
         let lower = name.to_lowercase();
-        if lower.ends_with(".zsc") || lower.ends_with(".txt") {
+        if lower.ends_with(".zsc") {
+            return SourceEcosystem::Zbrush;
+        }
+        if lower.ends_with(".txt") {
             // Check if txt contains ZScript syntax
-            if source.contains("[IButton") || source.contains("[IPress") || source.contains("[VarSet") {
+            if source.contains("[IButton") || source.contains("[IPress") || source.contains("[VarSet") || source.contains("ZBrush") {
                 return SourceEcosystem::Zbrush;
             }
         } else if lower.ends_with(".js") || (lower.ends_with(".json") && source.contains("nomad")) {

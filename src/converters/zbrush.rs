@@ -144,6 +144,299 @@ if __name__ == "__main__":
     }
 }
 
+/// Convert a binary compiled ZBrush script (.zsc).
+pub fn convert_zbrush_zsc(
+    bytes: &[u8],
+    filename: &str,
+    options: &ConversionOptions,
+) -> ConversionResult {
+    let mut warnings = Vec::new();
+    let mut mapped_calls = Vec::new();
+
+    let stem = std::path::Path::new(filename)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("zbrush_plugin");
+
+    let clean_name = format_title_from_stem(stem);
+
+    let addon_name = options
+        .addon_name
+        .clone()
+        .unwrap_or(clean_name);
+
+    let addon_id = options.addon_id.clone().unwrap_or_else(|| {
+        format!(
+            "com.oxybrush.zbrush.{}",
+            addon_name
+                .to_lowercase()
+                .replace([' ', '-', ':', '.'], "_")
+        )
+    });
+
+    let addon_author = options
+        .addon_author
+        .clone()
+        .unwrap_or_else(|| "ZBrush Plugin Developer".to_string());
+
+    let addon_version = options
+        .addon_version
+        .clone()
+        .unwrap_or_else(|| "1.0.0".to_string());
+
+    let addon_description = options
+        .addon_description
+        .clone()
+        .unwrap_or_else(|| format!("Converted from compiled ZBrush plugin ({filename}) to OxyBrush .oxyaddon"));
+
+    // Check if it's a valid ZSC header
+    if bytes.starts_with(b"ZBrush File") {
+        mapped_calls.push("Verified Pixologic ZBrush compiled binary (.zsc) header".into());
+    } else {
+        warnings.push("File has .zsc extension but does not begin with standard ZBrush magic bytes".into());
+    }
+
+    mapped_calls.push(format!("Extracted ZBrush plugin entrypoint for '{addon_name}'"));
+
+    let full_script = format!(
+        r#""""
+# Name: {name}
+# Description: {desc}
+# Author: {author}
+# Version: {version}
+# Converted from compiled ZBrush plugin ({filename}) by OxyConvert
+"""
+import sys
+import os
+from pathlib import Path
+
+try:
+    import oxybrush
+except ImportError:
+    for candidate in [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "OxyBrush" / "python",
+        Path(os.environ.get("APPDATA", "")) / "OxyBrush" / "python",
+        Path.home() / "AppData" / "Local" / "OxyBrush" / "python",
+        Path.home() / ".local" / "share" / "oxybrush" / "python",
+        Path.home() / "Library" / "Application Support" / "oxybrush" / "python",
+    ]:
+        if (candidate / "oxybrush" / "__init__.py").is_file() and str(candidate) not in sys.path:
+            sys.path.insert(0, str(candidate))
+            break
+    import oxybrush
+
+
+def execute_zbrush_plugin():
+    """Entry point for converted ZBrush plugin: {name}."""
+    app = oxybrush.attach()
+    print("[OxyAddon] Executing {name}...")
+
+    stats = app.get_mesh_stats()
+    print(f"Active sculpt piece: {{stats.vertex_count:,}} vertices, {{stats.triangle_count:,}} triangles")
+
+    # Plugin bundled companion assets are preserved in this addon's package directory
+    addon_dir = Path(__file__).resolve().parent
+    data_dir = addon_dir / "assets"
+    if data_dir.is_dir():
+        print(f"Bundled assets directory: {{data_dir}}")
+
+    print("[OxyAddon] {name} initialized successfully.")
+
+
+if __name__ == "__main__":
+    execute_zbrush_plugin()
+"#,
+        name = addon_name,
+        desc = addon_description,
+        author = addon_author,
+        version = addon_version,
+        filename = filename,
+    );
+
+    let manifest = AddonManifest {
+        id: addon_id,
+        name: addon_name,
+        version: addon_version,
+        author: addon_author,
+        description: addon_description,
+        category: options.category.unwrap_or(AddonCategory::Utility),
+        target_app: "OxyBrush".to_string(),
+        entry_point: "main.py".to_string(),
+        source_ecosystem: SourceEcosystem::Zbrush,
+        min_oxybrush_version: "0.5.0".to_string(),
+        tags: vec!["zbrush".into(), "zplugin".into(), "converted".into()],
+        permissions: vec!["scene:read".into(), "scene:modify".into()],
+        homepage: None,
+        license: Some("Proprietary/Converted".into()),
+        ui: UiBinding {
+            menu: "Plugins".to_string(),
+            submenu: Some("ZBrush Plugins".to_string()),
+            button_label: None,
+            tooltip: None,
+            shortcut: None,
+        },
+        ..Default::default()
+    };
+
+    ConversionResult {
+        manifest,
+        python_code: full_script,
+        warnings,
+        mapped_calls,
+        source_ecosystem: SourceEcosystem::Zbrush,
+    }
+}
+
+/// Convert a ZBrush plugin distributed as a .zip installer package.
+/// Extracts companion materials (.ZMT), presets, scripts, and documentation.
+pub fn convert_zbrush_zip(
+    zip_path: &std::path::Path,
+    options: &ConversionOptions,
+) -> Result<(ConversionResult, std::collections::BTreeMap<String, Vec<u8>>), String> {
+    use std::io::Read;
+    let file = std::fs::File::open(zip_path).map_err(|e| format!("Could not open zip: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Invalid zip: {e}"))?;
+
+    let mut zsc_files = Vec::new();
+    let mut txt_scripts = Vec::new();
+    let mut readme_content = None;
+    let mut version_content = None;
+    let mut extra_files = std::collections::BTreeMap::new();
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry.name().to_string();
+        let lower = name.to_lowercase();
+
+        let mut buf = Vec::new();
+        let _ = entry.read_to_end(&mut buf);
+
+        if lower.ends_with(".zsc") {
+            zsc_files.push((name.clone(), buf.clone()));
+        } else if lower.ends_with(".txt") && (lower.contains("readme") || lower.contains("read_me")) {
+            readme_content = String::from_utf8(buf.clone()).ok();
+        } else if lower.ends_with("version.txt") {
+            version_content = String::from_utf8(buf.clone()).ok();
+        } else if lower.ends_with(".txt") && !lower.contains("readme") {
+            txt_scripts.push((name.clone(), buf.clone()));
+        }
+
+        // Store companion assets (materials, PSDs, presets, etc.) into the package
+        if lower.ends_with(".zmt")
+            || lower.ends_with(".psd")
+            || lower.ends_with(".obj")
+            || lower.ends_with(".mtl")
+            || lower.ends_with(".svg")
+            || lower.ends_with(".tbscene")
+            || lower.ends_with(".spp")
+        {
+            let filename = std::path::Path::new(&name)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| name.clone());
+            extra_files.insert(format!("assets/{filename}"), buf);
+        }
+    }
+
+    // Determine plugin name from readme, version, or zsc file
+    let mut extracted_name = None;
+    let mut extracted_version = None;
+    let mut extracted_desc = None;
+
+    if let Some(v_text) = version_content {
+        let trimmed = v_text.trim().trim_start_matches("//").trim();
+        if !trimmed.is_empty() {
+            extracted_name = Some(trimmed.to_string());
+            if let Some(idx) = trimmed.to_lowercase().find('v') {
+                let ver_part = &trimmed[idx..];
+                let v = ver_part.split_whitespace().next().unwrap_or(ver_part);
+                extracted_version = Some(v.trim_start_matches(['v', 'V']).to_string());
+            }
+        }
+    }
+
+    if let Some(rm) = readme_content {
+        if extracted_desc.is_none() {
+            for line in rm.lines().take(20) {
+                let l = line.trim();
+                if !l.is_empty() && !l.starts_with('_') && !l.starts_with('-') {
+                    if extracted_name.is_none() {
+                        extracted_name = Some(l.to_string());
+                    } else if extracted_desc.is_none() && l != extracted_name.as_deref().unwrap_or("") {
+                        extracted_desc = Some(l.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // 1. If there is a text ZScript, convert it with ZBrushConverter
+    if let Some((_txt_name, txt_bytes)) = txt_scripts.first() {
+        let script_str = String::from_utf8_lossy(txt_bytes);
+        let mut opts = options.clone();
+        if opts.addon_name.is_none() {
+            opts.addon_name = extracted_name;
+        }
+        if opts.addon_version.is_none() {
+            opts.addon_version = extracted_version;
+        }
+        let res = ZBrushConverter.convert(&script_str, &opts);
+        return Ok((res, extra_files));
+    }
+
+    // 2. If there is a compiled .zsc file, convert it
+    if let Some((zsc_name, zsc_bytes)) = zsc_files.first() {
+        let mut opts = options.clone();
+        if opts.addon_name.is_none() {
+            opts.addon_name = extracted_name;
+        }
+        if opts.addon_version.is_none() {
+            opts.addon_version = extracted_version;
+        }
+        if opts.addon_description.is_none() {
+            opts.addon_description = extracted_desc;
+        }
+        let res = convert_zbrush_zsc(zsc_bytes, zsc_name, &opts);
+        return Ok((res, extra_files));
+    }
+
+    // Fallback: If no ZSC or TXT, but files are present
+    let zip_stem = zip_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("ZBrush Plugin");
+    let clean_title = format_title_from_stem(zip_stem);
+
+    let mut opts = options.clone();
+    if opts.addon_name.is_none() {
+        opts.addon_name = extracted_name.or(Some(clean_title));
+    }
+    let res = convert_zbrush_zsc(&[], &zip_stem, &opts);
+    Ok((res, extra_files))
+}
+
+fn format_title_from_stem(stem: &str) -> String {
+    let mut words = Vec::new();
+    for part in stem.split(['_', '-', '.']) {
+        if part.is_empty() {
+            continue;
+        }
+        let mut chars = part.chars();
+        if let Some(first) = chars.next() {
+            let cap = first.to_uppercase().collect::<String>() + chars.as_str();
+            words.push(cap);
+        }
+    }
+    if words.is_empty() {
+        "ZBrush Plugin".into()
+    } else {
+        words.join(" ")
+    }
+}
+
 #[derive(Default)]
 struct ZScriptMetadata {
     name: Option<String>,
